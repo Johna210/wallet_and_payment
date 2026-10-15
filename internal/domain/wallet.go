@@ -112,6 +112,32 @@ func (w Wallet) Debit(amount Money) (Wallet, error) {
 	return w, nil
 }
 
+// Transfer returns the source and destination Wallets after moving amount from
+// one to the other. The Wallets must be distinct and share a Currency, both
+// must be Active, and the source must hold at least amount. Money is moved,
+// never created or destroyed: the two Balances change by equal and opposite
+// amounts.
+func Transfer(source, destination Wallet, amount Money) (Wallet, Wallet, error) {
+	if source.ID == destination.ID {
+		return Wallet{}, Wallet{}, NewError(CodeSameWalletTransfer, "the source and destination wallets must differ")
+	}
+	if source.Currency() != destination.Currency() {
+		return Wallet{}, Wallet{}, NewError(CodeCurrencyMismatch,
+			fmt.Sprintf("cannot transfer from a %s wallet to a %s wallet", source.Currency(), destination.Currency()))
+	}
+	// The destination is checked first so that an inactive Wallet on either
+	// side is reported before the source's Balance is considered.
+	credited, err := destination.Credit(amount)
+	if err != nil {
+		return Wallet{}, Wallet{}, err
+	}
+	debited, err := source.Debit(amount)
+	if err != nil {
+		return Wallet{}, Wallet{}, err
+	}
+	return debited, credited, nil
+}
+
 // canTransition is the Wallet Status transition table for distinct statuses.
 func canTransition(from, to WalletStatus) bool {
 	switch from {

@@ -39,9 +39,11 @@ func registerRoutes(mux *http.ServeMux, d Deps) {
 	mux.HandleFunc("PATCH /v1/wallets/{id}/status", handleChangeWalletStatus(d.Wallets, ew))
 	mux.HandleFunc("POST /v1/wallets/{id}/deposits", handleDeposit(d.Ledger, ew))
 	mux.HandleFunc("POST /v1/wallets/{id}/withdrawals", handleWithdrawal(d.Ledger, ew))
+	mux.HandleFunc("POST /v1/transfers", handleTransfer(d.Ledger, ew))
 	mux.HandleFunc("GET /v1/transactions/{id}", handleGetTransaction(d.Ledger, ew))
 	mux.HandleFunc("GET /v1/deposits/{id}", handleGetTransactionOfType(d.Ledger, ew, domain.TypeDeposit))
 	mux.HandleFunc("GET /v1/withdrawals/{id}", handleGetTransactionOfType(d.Ledger, ew, domain.TypeWithdrawal))
+	mux.HandleFunc("GET /v1/transfers/{id}", handleGetTransactionOfType(d.Ledger, ew, domain.TypeTransfer))
 }
 
 // withMiddleware wraps mux in the middleware every route shares.

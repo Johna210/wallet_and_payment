@@ -122,3 +122,70 @@ func TestWalletDebit(t *testing.T) {
 		})
 	}
 }
+
+func TestTransfer(t *testing.T) {
+	const (
+		A = WalletActive
+		F = WalletFrozen
+		C = WalletClosed
+	)
+	cases := []struct {
+		name         string
+		srcStatus    WalletStatus
+		srcBalance   int64
+		dstStatus    WalletStatus
+		dstBalance   int64
+		dstCurrency  Currency
+		amount       int64
+		wantSrc      int64
+		wantDst      int64
+		wantCode     Code // empty means the transfer is allowed
+		sameWalletID bool
+	}{
+		{name: "moves money", srcStatus: A, srcBalance: 1000, dstStatus: A, dstBalance: 50, amount: 400, wantSrc: 600, wantDst: 450},
+		{name: "exact balance leaves source at zero", srcStatus: A, srcBalance: 1000, dstStatus: A, amount: 1000, wantSrc: 0, wantDst: 1000},
+		{name: "one over the balance", srcStatus: A, srcBalance: 1000, dstStatus: A, amount: 1001, wantCode: CodeInsufficientFunds},
+		{name: "frozen source", srcStatus: F, srcBalance: 1000, dstStatus: A, amount: 1, wantCode: CodeWalletNotActive},
+		{name: "closed source", srcStatus: C, srcBalance: 0, dstStatus: A, amount: 1, wantCode: CodeWalletNotActive},
+		{name: "frozen destination", srcStatus: A, srcBalance: 1000, dstStatus: F, amount: 1, wantCode: CodeWalletNotActive},
+		{name: "closed destination", srcStatus: A, srcBalance: 1000, dstStatus: C, amount: 1, wantCode: CodeWalletNotActive},
+		{name: "inactive destination is reported before insufficient funds", srcStatus: A, srcBalance: 0, dstStatus: F, amount: 1, wantCode: CodeWalletNotActive},
+		{name: "different currencies", srcStatus: A, srcBalance: 1000, dstStatus: A, dstCurrency: "USD", amount: 1, wantCode: CodeCurrencyMismatch},
+		{name: "currency mismatch is reported before insufficient funds", srcStatus: A, srcBalance: 0, dstStatus: A, dstCurrency: "USD", amount: 1, wantCode: CodeCurrencyMismatch},
+		{name: "same wallet", srcStatus: A, srcBalance: 1000, dstStatus: A, amount: 1, sameWalletID: true, wantCode: CodeSameWalletTransfer},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			src := walletWith(tc.srcStatus, tc.srcBalance)
+			dst := walletWith(tc.dstStatus, tc.dstBalance)
+			if tc.dstCurrency != "" {
+				dst.Balance.Currency = tc.dstCurrency
+			}
+			if tc.sameWalletID {
+				dst.ID = src.ID
+			}
+
+			gotSrc, gotDst, err := Transfer(src, dst, Money{Minor: tc.amount, Currency: "ETB"})
+
+			if tc.wantCode != "" {
+				de, ok := AsError(err)
+				if !ok || de.Code != tc.wantCode {
+					t.Fatalf("err = %v, want code %s", err, tc.wantCode)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			if gotSrc.Balance.Minor != tc.wantSrc || gotDst.Balance.Minor != tc.wantDst {
+				t.Errorf("balances = %d, %d; want %d, %d", gotSrc.Balance.Minor, gotDst.Balance.Minor, tc.wantSrc, tc.wantDst)
+			}
+			if got := gotSrc.Balance.Minor + gotDst.Balance.Minor; got != tc.srcBalance+tc.dstBalance {
+				t.Errorf("total after = %d, want %d: a transfer neither creates nor destroys money", got, tc.srcBalance+tc.dstBalance)
+			}
+			if src.Balance.Minor != tc.srcBalance || dst.Balance.Minor != tc.dstBalance {
+				t.Errorf("Transfer mutated its arguments")
+			}
+		})
+	}
+}

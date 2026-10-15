@@ -21,6 +21,7 @@ const (
 type LedgerService interface {
 	Deposit(ctx context.Context, walletID uuid.UUID, amount, idempotencyKey string) (service.MoneyMovement, error)
 	Withdraw(ctx context.Context, walletID uuid.UUID, amount, idempotencyKey string) (service.MoneyMovement, error)
+	Transfer(ctx context.Context, sourceID, destinationID uuid.UUID, amount, idempotencyKey string) (service.MoneyMovement, error)
 	GetTransaction(ctx context.Context, id uuid.UUID) (domain.TransactionDetail, error)
 	GetTransactionOfType(ctx context.Context, id uuid.UUID, t domain.TransactionType) (domain.TransactionDetail, error)
 }
@@ -167,6 +168,52 @@ func handleWalletMovement(ew errorWriter, move func(ctx context.Context, walletI
 			return
 		}
 		writeMovement(w, m, id)
+	}
+}
+
+type transferRequest struct {
+	SourceWalletID      string `json:"source_wallet_id"`
+	DestinationWalletID string `json:"destination_wallet_id"`
+	Amount              string `json:"amount"`
+}
+
+// handleTransfer serves POST /v1/transfers. The response's balance is the
+// source Wallet's, the Wallet the request spends from.
+func handleTransfer(svc LedgerService, ew errorWriter) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		key, err := idempotencyKey(r)
+		if err != nil {
+			ew.write(w, r, err)
+			return
+		}
+		var req transferRequest
+		if err := decodeJSON(r, &req); err != nil {
+			ew.write(w, r, err)
+			return
+		}
+		var fields []domain.FieldError
+		source, ok := parseUUID(req.SourceWalletID)
+		if !ok {
+			fields = append(fields, domain.FieldError{Field: "source_wallet_id", Message: "must be a UUID"})
+		}
+		destination, ok := parseUUID(req.DestinationWalletID)
+		if !ok {
+			fields = append(fields, domain.FieldError{Field: "destination_wallet_id", Message: "must be a UUID"})
+		}
+		if req.Amount == "" {
+			fields = append(fields, domain.FieldError{Field: "amount", Message: "is required"})
+		}
+		if len(fields) > 0 {
+			ew.write(w, r, domain.ValidationError(fields...))
+			return
+		}
+
+		m, err := svc.Transfer(r.Context(), source, destination, req.Amount, key)
+		if err != nil {
+			ew.write(w, r, err)
+			return
+		}
+		writeMovement(w, m, source)
 	}
 }
 
