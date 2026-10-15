@@ -8,7 +8,30 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5/pgtype"
 )
+
+type LedgerEntry struct {
+	ID            uuid.UUID
+	TransactionID uuid.UUID
+	WalletID      uuid.UUID
+	Amount        int64
+	BalanceAfter  int64
+	CreatedAt     time.Time
+}
+
+type Transaction struct {
+	ID                  uuid.UUID
+	Type                string
+	Status              string
+	Amount              int64
+	Currency            string
+	SourceWalletID      pgtype.UUID
+	DestinationWalletID pgtype.UUID
+	IdempotencyKey      string
+	RequestHash         string
+	CreatedAt           time.Time
+}
 
 type Wallet struct {
 	ID        uuid.UUID

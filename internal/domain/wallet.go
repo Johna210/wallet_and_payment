@@ -3,6 +3,7 @@ package domain
 import (
 	"errors"
 	"fmt"
+	"math"
 	"time"
 
 	"github.com/google/uuid"
@@ -79,6 +80,21 @@ func (w Wallet) TransitionTo(to WalletStatus) (Wallet, error) {
 		return Wallet{}, NewError(CodeWalletBalanceNotZero, "a wallet can only be closed when its balance is zero")
 	}
 	w.Status = to
+	return w, nil
+}
+
+// Credit returns the Wallet with amount added to its Balance. Only an Active
+// Wallet can receive money, and the new Balance must fit in int64 rather than
+// wrap.
+func (w Wallet) Credit(amount Money) (Wallet, error) {
+	if w.Status != WalletActive {
+		return Wallet{}, NewError(CodeWalletNotActive,
+			fmt.Sprintf("a %s wallet cannot receive money", w.Status))
+	}
+	if amount.Minor > math.MaxInt64-w.Balance.Minor {
+		return Wallet{}, NewError(CodeAmountExceedsLimit, "the amount would overflow the wallet balance")
+	}
+	w.Balance.Minor += amount.Minor
 	return w, nil
 }
 
