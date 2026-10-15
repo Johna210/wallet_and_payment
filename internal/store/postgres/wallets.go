@@ -23,12 +23,13 @@ const (
 
 // WalletStore persists Wallets.
 type WalletStore struct {
-	q *sqlcgen.Queries
+	pool *pgxpool.Pool
+	q    *sqlcgen.Queries
 }
 
 // NewWalletStore returns a WalletStore over pool.
 func NewWalletStore(pool *pgxpool.Pool) *WalletStore {
-	return &WalletStore{q: sqlcgen.New(pool)}
+	return &WalletStore{pool: pool, q: sqlcgen.New(pool)}
 }
 
 // Create inserts a new Active, zero-Balance Wallet. A second Wallet for the
@@ -56,6 +57,45 @@ func (s *WalletStore) Get(ctx context.Context, id uuid.UUID) (domain.Wallet, err
 		return domain.Wallet{}, fmt.Errorf("select wallet: %w", err)
 	}
 	return walletFromRow(row), nil
+}
+
+// UpdateLocked applies change to the Wallet with id inside one transaction
+// that holds the Wallet's row lock (SELECT … FOR UPDATE), so it serializes
+// with every other operation on that Wallet (ADR-0002). change must not alter
+// the Wallet's Balance. When it returns the Wallet's current status the row is
+// left untouched. Returns wallet_not_found, or whatever error change returns.
+func (s *WalletStore) UpdateLocked(ctx context.Context, id uuid.UUID, change func(domain.Wallet) (domain.Wallet, error)) (domain.Wallet, error) {
+	var updated domain.Wallet
+	err := pgx.BeginFunc(ctx, s.pool, func(tx pgx.Tx) error {
+		q := s.q.WithTx(tx)
+		row, err := q.GetWalletForUpdate(ctx, id)
+		if errors.Is(err, pgx.ErrNoRows) {
+			return domain.NewError(domain.CodeWalletNotFound, "no wallet exists with this id")
+		}
+		if err != nil {
+			return fmt.Errorf("lock wallet: %w", err)
+		}
+		current := walletFromRow(row)
+
+		next, err := change(current)
+		if err != nil {
+			return err
+		}
+		if next.Status == current.Status {
+			updated = current
+			return nil
+		}
+		row, err = q.UpdateWalletStatus(ctx, sqlcgen.UpdateWalletStatusParams{ID: id, Status: string(next.Status)})
+		if err != nil {
+			return fmt.Errorf("update wallet status: %w", err)
+		}
+		updated = walletFromRow(row)
+		return nil
+	})
+	if err != nil {
+		return domain.Wallet{}, err
+	}
+	return updated, nil
 }
 
 // List returns up to limit Wallets matching filter, newest first, starting

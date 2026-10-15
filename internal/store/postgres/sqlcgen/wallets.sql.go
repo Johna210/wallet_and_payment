@@ -58,6 +58,27 @@ func (q *Queries) GetWallet(ctx context.Context, id uuid.UUID) (Wallet, error) {
 	return i, err
 }
 
+const getWalletForUpdate = `-- name: GetWalletForUpdate :one
+SELECT id, user_id, currency, balance, status, created_at, updated_at FROM wallets
+WHERE id = $1
+FOR UPDATE
+`
+
+func (q *Queries) GetWalletForUpdate(ctx context.Context, id uuid.UUID) (Wallet, error) {
+	row := q.db.QueryRow(ctx, getWalletForUpdate, id)
+	var i Wallet
+	err := row.Scan(
+		&i.ID,
+		&i.UserID,
+		&i.Currency,
+		&i.Balance,
+		&i.Status,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
 const listWallets = `-- name: ListWallets :many
 SELECT id, user_id, currency, balance, status, created_at, updated_at FROM wallets
 WHERE ($1::uuid IS NULL OR user_id = $1)
@@ -111,4 +132,31 @@ func (q *Queries) ListWallets(ctx context.Context, arg ListWalletsParams) ([]Wal
 		return nil, err
 	}
 	return items, nil
+}
+
+const updateWalletStatus = `-- name: UpdateWalletStatus :one
+UPDATE wallets
+SET status = $2, updated_at = now()
+WHERE id = $1
+RETURNING id, user_id, currency, balance, status, created_at, updated_at
+`
+
+type UpdateWalletStatusParams struct {
+	ID     uuid.UUID
+	Status string
+}
+
+func (q *Queries) UpdateWalletStatus(ctx context.Context, arg UpdateWalletStatusParams) (Wallet, error) {
+	row := q.db.QueryRow(ctx, updateWalletStatus, arg.ID, arg.Status)
+	var i Wallet
+	err := row.Scan(
+		&i.ID,
+		&i.UserID,
+		&i.Currency,
+		&i.Balance,
+		&i.Status,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
 }

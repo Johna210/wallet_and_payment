@@ -2,6 +2,7 @@ package domain
 
 import (
 	"errors"
+	"fmt"
 	"time"
 
 	"github.com/google/uuid"
@@ -61,3 +62,33 @@ type Wallet struct {
 
 // Currency is the Wallet's Currency, carried by its Balance.
 func (w Wallet) Currency() Currency { return w.Balance.Currency }
+
+// TransitionTo returns the Wallet moved to the status to. Moving to the
+// current status is a no-op. Otherwise the move must be Active↔Frozen or
+// either into Closed; Closed is terminal, and a Wallet may only be Closed at
+// zero Balance.
+func (w Wallet) TransitionTo(to WalletStatus) (Wallet, error) {
+	if to == w.Status {
+		return w, nil
+	}
+	if !canTransition(w.Status, to) {
+		return Wallet{}, NewError(CodeInvalidStatusTransition,
+			fmt.Sprintf("a %s wallet cannot become %s", w.Status, to))
+	}
+	if to == WalletClosed && w.Balance.Minor != 0 {
+		return Wallet{}, NewError(CodeWalletBalanceNotZero, "a wallet can only be closed when its balance is zero")
+	}
+	w.Status = to
+	return w, nil
+}
+
+// canTransition is the Wallet Status transition table for distinct statuses.
+func canTransition(from, to WalletStatus) bool {
+	switch from {
+	case WalletActive:
+		return to == WalletFrozen || to == WalletClosed
+	case WalletFrozen:
+		return to == WalletActive || to == WalletClosed
+	}
+	return false
+}
