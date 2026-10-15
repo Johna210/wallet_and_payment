@@ -8,6 +8,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
+	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/Johna210/wallet_and_payment/internal/domain"
@@ -55,6 +56,37 @@ func (s *WalletStore) Get(ctx context.Context, id uuid.UUID) (domain.Wallet, err
 		return domain.Wallet{}, fmt.Errorf("select wallet: %w", err)
 	}
 	return walletFromRow(row), nil
+}
+
+// List returns up to limit Wallets matching filter, newest first, starting
+// strictly after the position when it is non-nil.
+func (s *WalletStore) List(ctx context.Context, filter domain.WalletFilter, after *domain.WalletPosition, limit int) ([]domain.Wallet, error) {
+	params := sqlcgen.ListWalletsParams{RowLimit: int32(limit)}
+	if after != nil {
+		params.AfterCreatedAt = pgtype.Timestamptz{Time: after.CreatedAt, Valid: true}
+		params.AfterID = pgtype.UUID{Bytes: after.ID, Valid: true}
+	}
+	if filter.UserID != nil {
+		params.UserID = pgtype.UUID{Bytes: *filter.UserID, Valid: true}
+	}
+	if filter.Status != nil {
+		status := string(*filter.Status)
+		params.Status = &status
+	}
+	if filter.Currency != nil {
+		currency := string(*filter.Currency)
+		params.Currency = &currency
+	}
+
+	rows, err := s.q.ListWallets(ctx, params)
+	if err != nil {
+		return nil, fmt.Errorf("select wallets: %w", err)
+	}
+	wallets := make([]domain.Wallet, len(rows))
+	for i, r := range rows {
+		wallets[i] = walletFromRow(r)
+	}
+	return wallets, nil
 }
 
 func walletFromRow(r sqlcgen.Wallet) domain.Wallet {
