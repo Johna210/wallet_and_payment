@@ -7,6 +7,7 @@ package integration
 import (
 	"context"
 	"crypto/rand"
+	"encoding/json"
 	"fmt"
 	"io"
 	"log/slog"
@@ -137,4 +138,69 @@ func get(t *testing.T, srv *httptest.Server, path string) *http.Response {
 	}
 	t.Cleanup(func() { _ = resp.Body.Close() })
 	return resp
+}
+
+// postJSON issues a POST with a JSON body; the body is closed when the test ends.
+func postJSON(t *testing.T, srv *httptest.Server, path, body string) *http.Response {
+	t.Helper()
+	resp, err := srv.Client().Post(srv.URL+path, "application/json", strings.NewReader(body))
+	if err != nil {
+		t.Fatalf("POST %s: %v", path, err)
+	}
+	t.Cleanup(func() { _ = resp.Body.Close() })
+	return resp
+}
+
+func readBody(t *testing.T, resp *http.Response) string {
+	t.Helper()
+	b, err := io.ReadAll(resp.Body)
+	if err != nil {
+		t.Fatalf("read body: %v", err)
+	}
+	return string(b)
+}
+
+// decode reads resp's JSON body into dst.
+func decode(t *testing.T, resp *http.Response, dst any) {
+	t.Helper()
+	if err := json.NewDecoder(resp.Body).Decode(dst); err != nil {
+		t.Fatalf("decode body: %v", err)
+	}
+}
+
+// problemBody is the subset of an RFC 9457 problem the tests assert on.
+type problemBody struct {
+	Status    int    `json:"status"`
+	Code      string `json:"code"`
+	RequestID string `json:"request_id"`
+	Errors    []struct {
+		Field   string `json:"field"`
+		Message string `json:"message"`
+	} `json:"errors"`
+}
+
+func (p problemBody) fieldNames() []string {
+	names := make([]string, len(p.Errors))
+	for i, e := range p.Errors {
+		names[i] = e.Field
+	}
+	return names
+}
+
+// decodeProblem decodes a problem response and checks the fields every
+// problem must carry.
+func decodeProblem(t *testing.T, resp *http.Response) problemBody {
+	t.Helper()
+	if ct := resp.Header.Get("Content-Type"); ct != "application/problem+json" {
+		t.Fatalf("Content-Type = %q, want application/problem+json", ct)
+	}
+	var p problemBody
+	decode(t, resp, &p)
+	if p.Status != resp.StatusCode {
+		t.Errorf("problem status %d != response status %d", p.Status, resp.StatusCode)
+	}
+	if p.RequestID == "" || p.RequestID != resp.Header.Get("X-Request-ID") {
+		t.Errorf("problem request_id %q does not match header %q", p.RequestID, resp.Header.Get("X-Request-ID"))
+	}
+	return p
 }
