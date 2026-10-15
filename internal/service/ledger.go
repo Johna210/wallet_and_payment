@@ -1,12 +1,14 @@
 package service
 
 import (
+	"bytes"
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"errors"
 	"fmt"
 	"log/slog"
+	"strings"
 
 	"github.com/google/uuid"
 
@@ -93,6 +95,99 @@ func (s *LedgerService) Withdraw(ctx context.Context, walletID uuid.UUID, amount
 	return s.moveOneWallet(ctx, withdrawalMove, walletID, amount, idempotencyKey)
 }
 
+// Transfer moves amount (a decimal string in the Wallets' shared Currency)
+// from the source Wallet to the destination Wallet.
+func (s *LedgerService) Transfer(ctx context.Context, sourceID, destinationID uuid.UUID, amount, idempotencyKey string) (out MoneyMovement, err error) {
+	op := financialOp{typ: domain.TypeTransfer, walletIDs: []uuid.UUID{sourceID, destinationID}, amount: amount, key: idempotencyKey}
+	defer func() { s.logOutcome(ctx, op, out, err) }()
+
+	// Wallets are inserted by Record with a CHECK that they differ, so a
+	// self-transfer must be refused before anything is stored.
+	if sourceID == destinationID {
+		return MoneyMovement{}, fmt.Errorf("transfer: %w",
+			domain.NewError(domain.CodeSameWalletTransfer, "the source and destination wallets must differ"))
+	}
+	// A Wallet's Currency never changes, so reading it without a lock is safe.
+	source, err := s.wallets.Get(ctx, sourceID)
+	if err != nil {
+		return MoneyMovement{}, fmt.Errorf("transfer: source wallet: %w", err)
+	}
+	if _, err := s.wallets.Get(ctx, destinationID); err != nil {
+		return MoneyMovement{}, fmt.Errorf("transfer: destination wallet: %w", err)
+	}
+	op.currency = source.Currency()
+	money, err := s.parseAmount(amount, source.Currency())
+	if err != nil {
+		return MoneyMovement{}, fmt.Errorf("transfer: %w", err)
+	}
+	hash := requestHash(domain.TypeTransfer, money, sourceID, destinationID)
+
+	out, err = s.execute(ctx, idempotencyKey, hash, func(tx LedgerTx) (domain.TransactionDetail, error) {
+		locked, err := lockInOrder(ctx, tx, sourceID, destinationID)
+		if err != nil {
+			return domain.TransactionDetail{}, err
+		}
+		// Record before the business rules, as in moveOneWallet.
+		rec, err := tx.Record(ctx, domain.NewTransaction{
+			Type:                domain.TypeTransfer,
+			Amount:              money,
+			SourceWalletID:      &sourceID,
+			DestinationWalletID: &destinationID,
+			IdempotencyKey:      idempotencyKey,
+			RequestHash:         hash,
+		})
+		if err != nil {
+			return domain.TransactionDetail{}, err
+		}
+		debited, credited, err := domain.Transfer(locked[sourceID], locked[destinationID], money)
+		if err != nil {
+			return domain.TransactionDetail{}, err
+		}
+		debit, err := tx.PostEntry(ctx, domain.NewLedgerEntry{
+			TransactionID: rec.ID,
+			WalletID:      sourceID,
+			Amount:        domain.Money{Minor: -money.Minor, Currency: money.Currency},
+			BalanceAfter:  debited.Balance,
+		})
+		if err != nil {
+			return domain.TransactionDetail{}, err
+		}
+		credit, err := tx.PostEntry(ctx, domain.NewLedgerEntry{
+			TransactionID: rec.ID,
+			WalletID:      destinationID,
+			Amount:        money,
+			BalanceAfter:  credited.Balance,
+		})
+		if err != nil {
+			return domain.TransactionDetail{}, err
+		}
+		return domain.TransactionDetail{Transaction: rec, Entries: []domain.LedgerEntry{debit, credit}}, nil
+	})
+	if err != nil {
+		return MoneyMovement{}, fmt.Errorf("transfer: %w", err)
+	}
+	return out, nil
+}
+
+// lockInOrder locks the two Wallets in ascending id order, the same order for
+// every Transfer, so concurrent Transfers between the same Wallets cannot
+// deadlock (ADR-0002). It returns the locked Wallets by id.
+func lockInOrder(ctx context.Context, tx LedgerTx, a, b uuid.UUID) (map[uuid.UUID]domain.Wallet, error) {
+	first, second := a, b
+	if bytes.Compare(second[:], first[:]) < 0 {
+		first, second = second, first
+	}
+	locked := make(map[uuid.UUID]domain.Wallet, 2)
+	for _, id := range []uuid.UUID{first, second} {
+		w, err := tx.LockWallet(ctx, id)
+		if err != nil {
+			return nil, err
+		}
+		locked[id] = w
+	}
+	return locked, nil
+}
+
 func (s *LedgerService) moveOneWallet(ctx context.Context, move walletMove, walletID uuid.UUID, amount, idempotencyKey string) (out MoneyMovement, err error) {
 	op := financialOp{typ: move.typ, walletIDs: []uuid.UUID{walletID}, amount: amount, key: idempotencyKey}
 	defer func() { s.logOutcome(ctx, op, out, err) }()
@@ -107,7 +202,7 @@ func (s *LedgerService) moveOneWallet(ctx context.Context, move walletMove, wall
 	if err != nil {
 		return MoneyMovement{}, fmt.Errorf("%s: %w", move.name, err)
 	}
-	hash := requestHash(move.typ, walletID, money)
+	hash := requestHash(move.typ, money, walletID)
 
 	out, err = s.execute(ctx, idempotencyKey, hash, func(tx LedgerTx) (domain.TransactionDetail, error) {
 		locked, err := tx.LockWallet(ctx, walletID)
@@ -230,8 +325,13 @@ func (s *LedgerService) logOutcome(ctx context.Context, op financialOp, m MoneyM
 		slog.String("type", string(op.typ)),
 		slog.String("idempotency_key", op.key),
 	}
-	if len(op.walletIDs) == 1 {
+	switch len(op.walletIDs) {
+	case 1:
 		attrs = append(attrs, slog.String("wallet_id", op.walletIDs[0].String()))
+	case 2:
+		attrs = append(attrs,
+			slog.String("source_wallet_id", op.walletIDs[0].String()),
+			slog.String("destination_wallet_id", op.walletIDs[1].String()))
 	}
 	if op.currency != "" {
 		attrs = append(attrs, slog.String("currency", string(op.currency)))
@@ -300,7 +400,11 @@ func (s *LedgerService) parseAmount(amount string, c domain.Currency) (domain.Mo
 
 // requestHash fingerprints a money-moving request over its canonical payload,
 // so the same Idempotency Key with a different request can be told apart.
-func requestHash(t domain.TransactionType, wallet uuid.UUID, amount domain.Money) string {
-	sum := sha256.Sum256(fmt.Appendf(nil, "%s|%s|%d|%s", t, wallet, amount.Minor, amount.Currency))
+func requestHash(t domain.TransactionType, amount domain.Money, wallets ...uuid.UUID) string {
+	ids := make([]string, len(wallets))
+	for i, w := range wallets {
+		ids[i] = w.String()
+	}
+	sum := sha256.Sum256(fmt.Appendf(nil, "%s|%s|%d|%s", t, strings.Join(ids, "|"), amount.Minor, amount.Currency))
 	return hex.EncodeToString(sum[:])
 }
