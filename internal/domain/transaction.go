@@ -7,7 +7,6 @@ import (
 	"github.com/google/uuid"
 )
 
-// TransactionType is the kind of financial operation a Transaction records.
 type TransactionType string
 
 const (
@@ -16,8 +15,6 @@ const (
 	TypeTransfer   TransactionType = "TRANSFER"
 )
 
-// ErrInvalidTransactionType is returned for any string that is not a
-// Transaction type.
 var ErrInvalidTransactionType = errors.New("must be one of DEPOSIT, WITHDRAWAL, TRANSFER")
 
 // ParseTransactionType accepts an exact, upper-case Transaction type.
@@ -41,7 +38,6 @@ const StatusCompleted TransactionStatus = "COMPLETED"
 // turns it into a replay or an idempotency_key_reuse error.
 var ErrDuplicateIdempotencyKey = errors.New("idempotency key already used")
 
-// Transaction is the record of one completed financial operation.
 type Transaction struct {
 	ID                  uuid.UUID
 	Type                TransactionType
@@ -82,20 +78,17 @@ type TransactionPosition struct {
 	ID        uuid.UUID
 }
 
-// TransactionPage is one page of a Transaction listing. Next is nil on the
-// last page.
+// TransactionPage is one page of a listing; Next is nil on the last page.
 type TransactionPage struct {
 	Transactions []Transaction
 	Next         *TransactionPosition
 }
 
-// TransactionDetail is a Transaction together with its Ledger Entries.
 type TransactionDetail struct {
 	Transaction
 	Entries []LedgerEntry
 }
 
-// NewTransaction is a Transaction about to be recorded.
 type NewTransaction struct {
 	Type                TransactionType
 	Amount              Money
@@ -105,7 +98,6 @@ type NewTransaction struct {
 	RequestHash         string
 }
 
-// NewLedgerEntry is a Ledger Entry about to be recorded.
 type NewLedgerEntry struct {
 	TransactionID uuid.UUID
 	WalletID      uuid.UUID

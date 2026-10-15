@@ -14,13 +14,11 @@ import (
 	"github.com/google/uuid"
 )
 
-// withdraw posts a Withdrawal of amount out of walletID under key.
 func withdraw(t *testing.T, srv *httptest.Server, walletID, key, amount string) *http.Response {
 	t.Helper()
 	return postWithKey(t, srv, "/v1/wallets/"+walletID+"/withdrawals", key, `{"amount":"`+amount+`"}`)
 }
 
-// fundedWallet creates a Wallet holding amount.
 func fundedWallet(t *testing.T, srv *httptest.Server, currency, amount string) walletBody {
 	t.Helper()
 	w := createWallet(t, srv, uuid.NewString(), currency)

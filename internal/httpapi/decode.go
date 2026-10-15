@@ -12,8 +12,7 @@ import (
 )
 
 // decodeJSON decodes the request body, which must be exactly one JSON object,
-// into dst. Unknown fields are rejected. The body size limit is enforced by
-// the limitBody middleware; exceeding it is reported here as payload_too_large.
+// into dst. Unknown fields are rejected.
 func decodeJSON(r *http.Request, dst any) error {
 	dec := json.NewDecoder(r.Body)
 	dec.DisallowUnknownFields()

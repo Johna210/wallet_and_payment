@@ -10,7 +10,6 @@ import (
 	"github.com/Johna210/wallet_and_payment/internal/domain"
 )
 
-// Deps is everything the transport needs to build the handler.
 type Deps struct {
 	Logger         *slog.Logger
 	Readiness      *Readiness
@@ -23,14 +22,12 @@ type Deps struct {
 	Requests RequestObserver
 }
 
-// NewHandler returns the service's complete http.Handler.
 func NewHandler(d Deps) http.Handler {
 	mux := http.NewServeMux()
 	registerRoutes(mux, d)
 	return withMiddleware(mux, d)
 }
 
-// registerRoutes adds every API route to mux.
 func registerRoutes(mux *http.ServeMux, d Deps) {
 	mux.HandleFunc("GET /healthz", handleHealthz)
 	mux.HandleFunc("GET /readyz", handleReadyz(d.Readiness, d.Logger))
@@ -52,7 +49,6 @@ func registerRoutes(mux *http.ServeMux, d Deps) {
 	mux.HandleFunc("GET /v1/transfers/{id}", handleGetTransactionOfType(d.Ledger, ew, domain.TypeTransfer))
 }
 
-// withMiddleware wraps mux in the middleware every route shares.
 func withMiddleware(mux *http.ServeMux, d Deps) http.Handler {
 	return chain(dispatch(mux),
 		requestID,
@@ -64,7 +60,6 @@ func withMiddleware(mux *http.ServeMux, d Deps) http.Handler {
 	)
 }
 
-// chain wraps h so the first middleware listed is the outermost.
 func chain(h http.Handler, mws ...func(http.Handler) http.Handler) http.Handler {
 	for i := len(mws) - 1; i >= 0; i-- {
 		h = mws[i](h)

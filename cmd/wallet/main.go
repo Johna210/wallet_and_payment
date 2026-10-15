@@ -66,10 +66,8 @@ func migrate(ctx context.Context, cfg config.Config, logger *slog.Logger) error 
 	return postgres.Migrate(ctx, pool, logger)
 }
 
-// serve runs the HTTP server until ctx is cancelled by SIGINT or SIGTERM, then
-// shuts down gracefully: readiness fails first so traffic drains away, the
-// server stops accepting connections and waits for in-flight requests, and
-// only then is the pool closed.
+// serve runs the HTTP server until SIGINT or SIGTERM, then shuts down gracefully:
+// readiness fails first so traffic drains, in-flight requests finish, then the pool closes.
 func serve(ctx context.Context, cfg config.Config, logger *slog.Logger) error {
 	pool, err := postgres.NewPool(ctx, cfg.DatabaseURL, cfg.DBMaxConns)
 	if err != nil {

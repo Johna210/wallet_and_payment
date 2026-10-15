@@ -156,7 +156,6 @@ type walletListBody struct {
 	NextCursor *string      `json:"next_cursor"`
 }
 
-// createWallet opens a Wallet through the API and returns it.
 func createWallet(t *testing.T, srv *httptest.Server, userID, currency string) walletBody {
 	t.Helper()
 	resp := postJSON(t, srv, "/v1/wallets", `{"user_id":"`+userID+`","currency":"`+currency+`"}`)
@@ -225,7 +224,6 @@ func TestListWalletsFilters(t *testing.T) {
 	aliceUSD := createWallet(t, srv, alice, "USD")
 	bobETB := createWallet(t, srv, bob, "ETB")
 	bobUSD := createWallet(t, srv, bob, "USD")
-	// Freeze two Wallets directly: there is no status-change endpoint yet.
 	if _, err := pool.Exec(context.Background(),
 		`UPDATE wallets SET status = 'FROZEN' WHERE id = ANY($1::uuid[])`,
 		[]string{aliceUSD.ID, bobETB.ID}); err != nil {
@@ -451,13 +449,11 @@ func TestListWalletsAcceptsLimitBounds(t *testing.T) {
 	}
 }
 
-// setStatus asks the API to change a Wallet's status and returns the response.
 func setStatus(t *testing.T, srv *httptest.Server, id, status string) *http.Response {
 	t.Helper()
 	return patchJSON(t, srv, "/v1/wallets/"+id+"/status", `{"status":"`+status+`"}`)
 }
 
-// mustSetStatus changes a Wallet's status, failing the test unless it succeeds.
 func mustSetStatus(t *testing.T, srv *httptest.Server, id, status string) walletBody {
 	t.Helper()
 	resp := setStatus(t, srv, id, status)

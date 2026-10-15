@@ -17,10 +17,8 @@ var maxCursorMicros = time.Date(9999, 12, 31, 23, 59, 59, 0, time.UTC).UnixMicro
 
 var errInvalidCursor = errors.New("is not a valid cursor")
 
-// cursorPayload is the wire form of a listing position: the (created_at, id) of the
-// last item on a page. Clients treat the encoded string as opaque. Time is in
-// microseconds, the precision Postgres stores, so a position survives the round
-// trip exactly.
+// cursorPayload is the wire form of a listing position. Time is in microseconds,
+// the precision Postgres stores, so a position survives the round trip exactly.
 type cursorPayload struct {
 	Micros int64     `json:"t"`
 	ID     uuid.UUID `json:"id"`

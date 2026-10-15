@@ -9,7 +9,6 @@ import (
 	"github.com/google/uuid"
 )
 
-// WalletStatus is the lifecycle state of a Wallet.
 type WalletStatus string
 
 const (
@@ -18,7 +17,6 @@ const (
 	WalletClosed WalletStatus = "CLOSED"
 )
 
-// ErrInvalidWalletStatus is returned for any string that is not a Wallet Status.
 var ErrInvalidWalletStatus = errors.New("must be one of ACTIVE, FROZEN, CLOSED")
 
 // ParseWalletStatus accepts an exact, upper-case Wallet Status.
@@ -51,7 +49,6 @@ type WalletPage struct {
 	Next    *WalletPosition
 }
 
-// Wallet is a store of value owned by one User in exactly one Currency.
 type Wallet struct {
 	ID        uuid.UUID
 	UserID    uuid.UUID
@@ -61,7 +58,6 @@ type Wallet struct {
 	UpdatedAt time.Time
 }
 
-// Currency is the Wallet's Currency, carried by its Balance.
 func (w Wallet) Currency() Currency { return w.Balance.Currency }
 
 // TransitionTo returns the Wallet moved to the status to. Moving to the
@@ -83,9 +79,8 @@ func (w Wallet) TransitionTo(to WalletStatus) (Wallet, error) {
 	return w, nil
 }
 
-// Credit returns the Wallet with amount added to its Balance. Only an Active
-// Wallet can receive money, and the new Balance must fit in int64 rather than
-// wrap.
+// Credit adds amount to the Balance. Only an Active Wallet can receive money,
+// and the Balance may not overflow int64.
 func (w Wallet) Credit(amount Money) (Wallet, error) {
 	if w.Status != WalletActive {
 		return Wallet{}, NewError(CodeWalletNotActive,
@@ -112,11 +107,8 @@ func (w Wallet) Debit(amount Money) (Wallet, error) {
 	return w, nil
 }
 
-// Transfer returns the source and destination Wallets after moving amount from
-// one to the other. The Wallets must be distinct and share a Currency, both
-// must be Active, and the source must hold at least amount. Money is moved,
-// never created or destroyed: the two Balances change by equal and opposite
-// amounts.
+// Transfer moves amount from one Wallet to another. The Wallets must be
+// distinct, share a Currency and be Active, and the source must hold at least amount.
 func Transfer(source, destination Wallet, amount Money) (Wallet, Wallet, error) {
 	if source.ID == destination.ID {
 		return Wallet{}, Wallet{}, NewError(CodeSameWalletTransfer, "the source and destination wallets must differ")
@@ -138,7 +130,6 @@ func Transfer(source, destination Wallet, amount Money) (Wallet, Wallet, error) 
 	return debited, credited, nil
 }
 
-// canTransition is the Wallet Status transition table for distinct statuses.
 func canTransition(from, to WalletStatus) bool {
 	switch from {
 	case WalletActive:

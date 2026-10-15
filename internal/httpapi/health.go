@@ -22,7 +22,6 @@ type Readiness struct {
 	shuttingDown atomic.Bool
 }
 
-// NewReadiness returns a Readiness that pings db on every check.
 func NewReadiness(db Pinger) *Readiness {
 	return &Readiness{db: db}
 }

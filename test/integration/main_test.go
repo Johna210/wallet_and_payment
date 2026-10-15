@@ -74,7 +74,6 @@ func run(m *testing.M) int {
 	return m.Run()
 }
 
-// testConfig is the configuration the service runs with under test.
 func testConfig() config.Config {
 	return config.Config{
 		RequestTimeout:     5 * time.Second,
@@ -83,15 +82,12 @@ func testConfig() config.Config {
 	}
 }
 
-// newServer truncates every application table and returns the real handler
-// built over the shared pool, served by httptest.
 func newServer(t *testing.T) *httptest.Server {
 	t.Helper()
 	truncate(t)
 	return serve(t, pool)
 }
 
-// serve builds the real handler over p, exactly as the binary does.
 func serve(t *testing.T, p *pgxpool.Pool) *httptest.Server {
 	t.Helper()
 	logger := slog.New(slog.NewJSONHandler(io.Discard, nil))
@@ -130,7 +126,6 @@ func truncate(t *testing.T) {
 	}
 }
 
-// get issues a GET against srv; the body is closed when the test ends.
 func get(t *testing.T, srv *httptest.Server, path string) *http.Response {
 	t.Helper()
 	resp, err := srv.Client().Get(srv.URL + path)
@@ -141,7 +136,6 @@ func get(t *testing.T, srv *httptest.Server, path string) *http.Response {
 	return resp
 }
 
-// postJSON issues a POST with a JSON body; the body is closed when the test ends.
 func postJSON(t *testing.T, srv *httptest.Server, path, body string) *http.Response {
 	t.Helper()
 	resp, err := srv.Client().Post(srv.URL+path, "application/json", strings.NewReader(body))
@@ -152,8 +146,7 @@ func postJSON(t *testing.T, srv *httptest.Server, path, body string) *http.Respo
 	return resp
 }
 
-// postWithKey issues a POST with a JSON body and an Idempotency-Key header
-// (omitted when key is empty); the body is closed when the test ends.
+// postWithKey posts JSON with an Idempotency-Key header (omitted when key is empty).
 func postWithKey(t *testing.T, srv *httptest.Server, path, key, body string) *http.Response {
 	t.Helper()
 	resp, err := doPostWithKey(srv, path, key, body)
@@ -177,7 +170,6 @@ func doPostWithKey(srv *httptest.Server, path, key, body string) (*http.Response
 	return srv.Client().Do(req)
 }
 
-// patchJSON issues a PATCH with a JSON body; the body is closed when the test ends.
 func patchJSON(t *testing.T, srv *httptest.Server, path, body string) *http.Response {
 	t.Helper()
 	req, err := http.NewRequest(http.MethodPatch, srv.URL+path, strings.NewReader(body))
@@ -202,7 +194,6 @@ func readBody(t *testing.T, resp *http.Response) string {
 	return string(b)
 }
 
-// decode reads resp's JSON body into dst.
 func decode(t *testing.T, resp *http.Response, dst any) {
 	t.Helper()
 	if err := json.NewDecoder(resp.Body).Decode(dst); err != nil {
@@ -247,7 +238,6 @@ func decodeProblem(t *testing.T, resp *http.Response) problemBody {
 	return p
 }
 
-// countRows returns how many rows table holds, read straight from the database.
 func countRows(t *testing.T, table string) int {
 	t.Helper()
 	var n int

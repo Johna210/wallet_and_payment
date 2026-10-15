@@ -36,13 +36,11 @@ type transactionBody struct {
 	LedgerEntries       []ledgerEntryBody `json:"ledger_entries"`
 }
 
-// deposit posts a Deposit of amount into walletID under key.
 func deposit(t *testing.T, srv *httptest.Server, walletID, key, amount string) *http.Response {
 	t.Helper()
 	return postWithKey(t, srv, "/v1/wallets/"+walletID+"/deposits", key, `{"amount":"`+amount+`"}`)
 }
 
-// mustDeposit deposits and fails the test unless the Deposit is newly created.
 func mustDeposit(t *testing.T, srv *httptest.Server, walletID, amount string) transactionBody {
 	t.Helper()
 	resp := deposit(t, srv, walletID, uuid.NewString(), amount)

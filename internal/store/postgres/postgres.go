@@ -1,5 +1,5 @@
-// Package postgres is the PostgreSQL store: connection pool, migrations, and
-// (in later slices) the repositories built on sqlc-generated queries.
+// Package postgres is the PostgreSQL store: connection pool, migrations, and the
+// repositories built on sqlc-generated queries.
 package postgres
 
 import (
@@ -31,8 +31,7 @@ func NewPool(ctx context.Context, databaseURL string, maxConns int32) (*pgxpool.
 	return pool, nil
 }
 
-// Migrate applies every pending embedded migration over the pool. Running it
-// again when the schema is current is a no-op.
+// Migrate applies every pending embedded migration over the pool.
 func Migrate(ctx context.Context, pool *pgxpool.Pool, logger *slog.Logger) error {
 	// Closing this *sql.DB releases its handle only; the pool stays open.
 	db := stdlib.OpenDBFromPool(pool)

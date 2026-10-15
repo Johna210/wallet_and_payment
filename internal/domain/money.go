@@ -8,7 +8,6 @@ import (
 	"strings"
 )
 
-// Currency is a supported ISO-4217 code.
 type Currency string
 
 const (
@@ -25,7 +24,6 @@ var minorDigits = map[Currency]int{
 	EUR: 2,
 }
 
-// ErrUnsupportedCurrency is returned for any code missing from the table.
 var ErrUnsupportedCurrency = errors.New("is not a supported currency")
 
 // ParseCurrency accepts an exact, upper-case supported code.
@@ -37,7 +35,6 @@ func ParseCurrency(code string) (Currency, error) {
 	return c, nil
 }
 
-// MinorDigits is how many decimal places an amount in c may carry.
 func (c Currency) MinorDigits() int { return minorDigits[c] }
 
 // Money is an amount in a Currency, held as an integer count of minor units.
@@ -102,7 +99,6 @@ func (m Money) String() string {
 	return s
 }
 
-// allDigits reports whether s is non-empty and only ASCII digits.
 func allDigits(s string) bool {
 	if s == "" {
 		return false

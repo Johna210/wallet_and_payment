@@ -19,7 +19,6 @@ const (
 	maxIdempotencyKeyLength  = 255
 )
 
-// LedgerService is the money-moving and Transaction use cases the transport calls.
 type LedgerService interface {
 	Deposit(ctx context.Context, walletID uuid.UUID, amount, idempotencyKey string) (service.MoneyMovement, error)
 	Withdraw(ctx context.Context, walletID uuid.UUID, amount, idempotencyKey string) (service.MoneyMovement, error)
@@ -38,8 +37,7 @@ type ledgerEntryResponse struct {
 	CreatedAt    time.Time `json:"created_at"`
 }
 
-// transactionSummaryResponse is a Transaction as listings show it, without its
-// Ledger Entries.
+// transactionSummaryResponse is a Transaction as listings show it, without Ledger Entries.
 type transactionSummaryResponse struct {
 	ID                  uuid.UUID                `json:"id"`
 	Type                domain.TransactionType   `json:"type"`
@@ -66,7 +64,6 @@ func newTransactionSummaryResponse(t domain.Transaction) transactionSummaryRespo
 	}
 }
 
-// transactionResponse is a Transaction with its Ledger Entries.
 type transactionResponse struct {
 	transactionSummaryResponse
 	LedgerEntries []ledgerEntryResponse `json:"ledger_entries"`
@@ -89,8 +86,7 @@ func newTransactionResponse(d domain.TransactionDetail) transactionResponse {
 	}
 }
 
-// movementResponse is a Transaction plus the Balance it left the request's
-// Wallet with, as returned by the money-moving endpoints.
+// movementResponse is a Transaction plus the Balance the request's Wallet ended with.
 type movementResponse struct {
 	transactionResponse
 	Balance string `json:"balance"`
@@ -114,7 +110,6 @@ func writeMovement(w http.ResponseWriter, m service.MoneyMovement, balanceWallet
 	writeJSON(w, status, resp)
 }
 
-// idempotencyKey reads the required Idempotency-Key header.
 func idempotencyKey(r *http.Request) (string, error) {
 	key := r.Header.Get(idempotencyKeyHeader)
 	if key == "" {
@@ -143,8 +138,7 @@ type amountRequest struct {
 	Amount string `json:"amount"`
 }
 
-// handleDeposit and handleWithdrawal serve the single-Wallet money-moving
-// endpoints, which differ only in the use case they call.
+// handleDeposit and handleWithdrawal differ only in the use case they call.
 func handleDeposit(svc LedgerService, ew errorWriter) http.HandlerFunc {
 	return handleWalletMovement(ew, func(ctx context.Context, id uuid.UUID, amount, key string) (service.MoneyMovement, error) {
 		return svc.Deposit(ctx, id, amount, key)
@@ -240,8 +234,7 @@ func handleGetTransaction(svc LedgerService, ew errorWriter) http.HandlerFunc {
 	})
 }
 
-// handleGetTransactionOfType serves the typed read endpoints, which answer 404
-// for a Transaction of any other type.
+// handleGetTransactionOfType answers 404 for a Transaction of any other type.
 func handleGetTransactionOfType(svc LedgerService, ew errorWriter, t domain.TransactionType) http.HandlerFunc {
 	return transactionGetter(ew, func(ctx context.Context, id uuid.UUID) (domain.TransactionDetail, error) {
 		return svc.GetTransactionOfType(ctx, id, t)
@@ -285,16 +278,14 @@ func handleListTransactions(svc LedgerService, ew errorWriter) http.HandlerFunc 
 	}
 }
 
-// transactionListQuery is a parsed Transaction listing query string.
 type transactionListQuery struct {
 	filter domain.TransactionFilter
 	after  *domain.TransactionPosition
 	limit  int
 }
 
-// parseTransactionListQuery reads type, from, to, currency, limit, and cursor,
-// reporting every invalid parameter at once. from and to are inclusive RFC 3339
-// instants.
+// parseTransactionListQuery reports every invalid parameter at once. from and to
+// are inclusive RFC 3339 instants.
 func parseTransactionListQuery(q url.Values) (transactionListQuery, error) {
 	var (
 		out    = transactionListQuery{limit: defaultPageSize}
@@ -355,8 +346,6 @@ func parseTransactionListQuery(q url.Values) (transactionListQuery, error) {
 	return out, nil
 }
 
-// handleListWalletTransactions serves a Wallet's statement: the Transactions it
-// took part in, as source or destination.
 func handleListWalletTransactions(svc LedgerService, ew errorWriter) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		id, ok := parseUUID(r.PathValue("id"))
