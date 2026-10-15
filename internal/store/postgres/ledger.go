@@ -49,7 +49,7 @@ func (s *LedgerStore) Get(ctx context.Context, id uuid.UUID) (domain.Transaction
 	if err != nil {
 		return domain.TransactionDetail{}, fmt.Errorf("select transaction: %w", err)
 	}
-	return detail(ctx, s.q, row)
+	return withEntries(ctx, s.q, row)
 }
 
 // ledgerTx is the work a LedgerStore transaction exposes to the service.
@@ -65,7 +65,7 @@ func (t *ledgerTx) FindByIdempotencyKey(ctx context.Context, key string) (domain
 	if err != nil {
 		return domain.TransactionDetail{}, false, fmt.Errorf("select transaction by idempotency key: %w", err)
 	}
-	d, err := detail(ctx, t.q, row)
+	d, err := withEntries(ctx, t.q, row)
 	return d, err == nil, err
 }
 
@@ -118,7 +118,8 @@ func (t *ledgerTx) PostEntry(ctx context.Context, n domain.NewLedgerEntry) (doma
 	return entryFromRow(row, n.Amount.Currency), nil
 }
 
-func detail(ctx context.Context, q *sqlcgen.Queries, row sqlcgen.Transaction) (domain.TransactionDetail, error) {
+// withEntries loads the Ledger Entries of a Transaction row.
+func withEntries(ctx context.Context, q *sqlcgen.Queries, row sqlcgen.Transaction) (domain.TransactionDetail, error) {
 	rows, err := q.ListLedgerEntriesForTransaction(ctx, row.ID)
 	if err != nil {
 		return domain.TransactionDetail{}, fmt.Errorf("select ledger entries: %w", err)

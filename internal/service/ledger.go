@@ -53,8 +53,7 @@ type LedgerService struct {
 }
 
 // NewLedgerService returns a LedgerService that logs every financial operation
-// to logger and refuses any single operation
-// above maxAmount minor units.
+// to logger and refuses any single operation above maxAmount minor units.
 func NewLedgerService(repo LedgerRepository, wallets WalletReader, logger *slog.Logger, maxAmount int64) *LedgerService {
 	return &LedgerService{repo: repo, wallets: wallets, logger: logger, maxAmount: maxAmount}
 }
@@ -89,10 +88,11 @@ func (s *LedgerService) Deposit(ctx context.Context, walletID uuid.UUID, amount,
 		if err != nil {
 			return domain.TransactionDetail{}, err
 		}
-		credited, err := locked.Credit(money)
-		if err != nil {
-			return domain.TransactionDetail{}, err
-		}
+		// Record before the business rules: a concurrent request with this key
+		// that committed while we waited for the lock must be answered as a
+		// replay (via ErrDuplicateIdempotencyKey), not judged against a Wallet
+		// its own Transaction has since changed. A rule failure below still
+		// rolls the Transaction back, so Rejections store nothing.
 		rec, err := tx.Record(ctx, domain.NewTransaction{
 			Type:                domain.TypeDeposit,
 			Amount:              money,
@@ -100,6 +100,10 @@ func (s *LedgerService) Deposit(ctx context.Context, walletID uuid.UUID, amount,
 			IdempotencyKey:      idempotencyKey,
 			RequestHash:         hash,
 		})
+		if err != nil {
+			return domain.TransactionDetail{}, err
+		}
+		credited, err := locked.Credit(money)
 		if err != nil {
 			return domain.TransactionDetail{}, err
 		}
