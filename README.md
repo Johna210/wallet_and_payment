@@ -36,7 +36,7 @@ What it offers:
 - Transaction queries: by id, per wallet (a statement), and across all wallets, with filters and cursor pagination.
 - `/healthz`, `/readyz` and a Prometheus `/metrics` endpoint, plus structured JSON logs.
 
-Every money-moving request runs in one database transaction that locks the wallets involved, writes a transaction and its ledger entries, and updates the cached balance. A request that breaks a business rule (insufficient funds, frozen wallet, currency mismatch) is a rejection. It returns a precise error, is logged and counted, and is never stored as a transaction.
+Every money-moving request runs in one database transaction that locks the wallets involved, writes a transaction and its ledger entries, and updates the cached balance. A request that breaks a business rule (insufficient funds, frozen wallet, currency mismatch) is a rejection. It returns a specific error code, is logged and counted, and is never stored as a transaction.
 
 ## 2. Architecture
 
@@ -104,7 +104,7 @@ Wallet status rules:
 
 - `ACTIVE` to `FROZEN`, and `FROZEN` to `ACTIVE`.
 - `ACTIVE` or `FROZEN` to `CLOSED`, only at zero balance.
-- `CLOSED` to anything is rejected.
+- `CLOSED` to any other status is rejected.
 - Setting the current status again is a no-op and returns the wallet with 200.
 
 ## 4. Database design
@@ -207,7 +207,7 @@ Served at `/metrics`. Route labels use the matched pattern, never the raw path, 
 | --- | --- | --- |
 | `http_requests_total` | `method`, `route`, `status` | Are requests succeeding? |
 | `http_request_duration_seconds` | `method`, `route` | Are requests slowing down? |
-| `wallet_financial_operations_total` | `type`, `outcome`, `reason` | Are financial operations failing, and why? `outcome` is `success`, `rejected` or `error` |
+| `wallet_financial_operations_total` | `type`, `outcome`, `reason` | Are financial operations failing, and why? `type` is lowercase (`deposit`, `withdrawal`, `transfer`). `outcome` is `success`, `rejected` or `error` |
 | `wallet_financial_operation_duration_seconds` | `type` | How long do money-moving operations take? |
 | `db_pool_acquired_connections`, `db_pool_idle_connections`, `db_pool_total_connections` | none | Pool usage |
 | `db_pool_acquire_wait_seconds_total` | none | Pool exhaustion: time spent waiting for a connection |
@@ -230,7 +230,7 @@ Strategy: test behaviour from the outside. The main seam is the real HTTP handle
 
 What the integration tests cover:
 
-- Every endpoint, every error code, and the full status transition table.
+- Every endpoint, the business-rule and validation error codes, and the full status transition table. Transport-level codes (`route_not_found`, `method_not_allowed`, `payload_too_large`, `request_timeout`, `internal_error`) are covered by the handler unit tests in `internal/httpapi`.
 - Idempotency: replay, replay with different amount formatting, key reuse with a different payload, key reuse across operation types, missing key, a rejected request retried with the same key, and concurrent requests with the same key producing exactly one transaction.
 - Concurrency: mixed withdrawals and opposite-direction transfers over a small set of wallets. Afterwards the tests assert no negative balance, a system total equal to deposits minus withdrawals, each balance equal to the sum of its ledger entries, and no 500s. Concurrent withdrawals never overdraw.
 - Listings: filters, invalid filters and cursors, pagination that visits every row exactly once, stability while new rows arrive, tie-breaking on id, and `EXPLAIN` checks that the queries use indexes.
@@ -260,13 +260,13 @@ Integration tests carry the `integration` build tag, so `make test` stays fast.
 
 ## 10. Trade-offs
 
-- Row locks over optimistic concurrency. Throughput on a single very hot wallet is limited to one operation at a time. In exchange there are no retry loops, and correctness is easy to argue.
+- Row locks over optimistic concurrency. Throughput on a single very hot wallet is limited to one operation at a time. In exchange there are no retry loops, and correctness is simple to reason about.
 - Cached balance plus entries means two writes per operation and an invariant to protect, instead of one. The reward is cheap balance reads and an auditable history.
 - Implicit external side for deposits and withdrawals. A deposit has one ledger entry and the entries of a deposit do not sum to zero. A full double-entry model would balance everything but needs system accounts the brief did not call for.
 - Rejections are not persisted. The database stays an exact record of completed money movement, but there is no queryable history of refused attempts. Logs and metrics are the record.
 - Global idempotency keys. Simple and race-free now. They would need scoping per client once authentication exists.
 - Keyset pagination cannot jump to page N. It is stable and fast, which matters more for a ledger.
-- No framework, no ORM. A little more boilerplate (routing, DTOs) for far less magic.
+- No framework, no ORM. A little more boilerplate (routing, DTOs) for less hidden behaviour.
 - A request id is accepted from the client. It is only validated, not trusted. It is for correlation, not security.
 
 ## 11. Limitations
@@ -287,7 +287,7 @@ Each item below is out of scope for this submission. The matching production app
 
 ## 12. Future improvements
 
-Larger scale and production approach, including everything listed as out of scope.
+Each limitation from section 11 with the approach I would take in production, and what changes at larger scale.
 
 - Authentication and authorization. Put the service behind an identity provider (JWT or mTLS between services), derive the caller from the token, check wallet ownership on every call, and give admin-only status changes their own scope. Scope idempotency keys per client at the same time (`UNIQUE (client_id, idempotency_key)`).
 - Currency conversion. Add a rates source and a conversion transfer type that writes four entries (debit, credit, and two legs against a currency exchange account), storing the rate and its timestamp on the transaction.
@@ -300,7 +300,7 @@ Larger scale and production approach, including everything listed as out of scop
 - Idempotency key expiry. Keep keys for a fixed window (for example 24 to 72 hours). Move them into a separate table with a timestamp and delete expired rows in batches, keeping the transaction itself forever.
 - Scaling the database. Read replicas for statement queries, partitioning `transactions` and `ledger_entries` by month, archiving old partitions, and sharding wallets by id if one primary is no longer enough. Transfers across shards would then need a saga or two-phase approach, which is a reason to defer sharding.
 - Periodic reconciliation. A job that checks `wallets.balance = SUM(ledger_entries.amount)` for every wallet and alerts on drift.
-- Modular monolith structure. With more time I would reshape this into a proper Go modular monolith, like the core-backend service in [Final-Year-Project-G22/backend](https://github.com/Final-Year-Project-G22/backend/). Wallets, ledger, and later users, payments and notifications would each be a module with its own domain, service, store and transport code, wired together in one composition root. Modules would talk to each other only through small exported interfaces, so one can be pulled out into its own service later without rewriting the others. Today the layers are split by technical role (`domain`, `service`, `store`, `httpapi`), which is fine for two use cases but would not hold up as the product grows.
+- Modular monolith structure. With more time I would reshape this into a Go modular monolith, like the core-backend service in [Final-Year-Project-G22/backend](https://github.com/Final-Year-Project-G22/backend/). Wallets, ledger, and later users, payments and notifications would each be a module with its own domain, service, store and transport code, wired together in one composition root. Modules would talk to each other only through small exported interfaces, so one can be pulled out into its own service later without rewriting the others. Today the layers are split by technical role (`domain`, `service`, `store`, `httpapi`), which is fine for two use cases but would not hold up as the product grows.
 
 ## 13. Running the application
 
@@ -326,7 +326,7 @@ Change `POSTGRES_PASSWORD` in `.env` if you like. `docker compose` refuses to st
 | `POSTGRES_PORT` | 5432 | Host port Postgres is published on |
 | `PROMETHEUS_PORT` | 9090 | Host port Prometheus is published on |
 | `DATABASE_URL` | none, required | Connection string for `serve` and `migrate`. Compose builds this for the containers |
-| `HTTP_ADDR` | `:8080` | Listen address |
+| `HTTP_ADDR` | `:8080` | Listen address. Under compose, keep the port at 8080: the published port and the Prometheus scrape target are fixed to it |
 | `DB_MAX_CONNS` | 10 | Pool size |
 | `LOG_LEVEL` | `info` | `debug`, `info`, `warn` or `error` |
 | `HTTP_READ_TIMEOUT`, `HTTP_WRITE_TIMEOUT`, `HTTP_IDLE_TIMEOUT` | 10s, 15s, 60s | Server timeouts. Write timeout must exceed `REQUEST_TIMEOUT` |
@@ -434,11 +434,11 @@ curl -s -X POST $BASE/v1/wallets/$BOB/withdrawals \
 curl -s $BASE/v1/wallets/$ALICE | jq -c '{id,balance}'
 curl -s $BASE/v1/wallets/$BOB | jq -c '{id,balance}'
 
-# Alice's statement, newest first (deposit, withdrawal and the transfer)
+# Alice's statement, newest first (the transfer, the withdrawal, then the deposit)
 curl -s "$BASE/v1/wallets/$ALICE/transactions?limit=10" | jq -c '.data[] | {type,amount}'
 
-# All transfers in ETB
-curl -s "$BASE/v1/transactions?type=TRANSFER&currency=ETB" | jq '.data | length'
+# Only the transfers in Alice's statement (1)
+curl -s "$BASE/v1/wallets/$ALICE/transactions?type=TRANSFER" | jq '.data | length'
 
 # Freeze Bob's wallet, then watch the counters
 curl -s -X PATCH $BASE/v1/wallets/$BOB/status \
