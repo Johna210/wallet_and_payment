@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
@@ -50,6 +51,95 @@ func (s *LedgerStore) Get(ctx context.Context, id uuid.UUID) (domain.Transaction
 		return domain.TransactionDetail{}, fmt.Errorf("select transaction: %w", err)
 	}
 	return withEntries(ctx, s.q, row)
+}
+
+// List returns up to limit Transactions across all Wallets matching filter,
+// newest first, starting strictly after the position when it is non-nil.
+func (s *LedgerStore) List(ctx context.Context, filter domain.TransactionFilter, after *domain.TransactionPosition, limit int) ([]domain.Transaction, error) {
+	afterAt, afterID := afterParams(after)
+	rows, err := s.q.ListTransactions(ctx, sqlcgen.ListTransactionsParams{
+		Type:           optionalString(filter.Type),
+		Currency:       optionalString(filter.Currency),
+		CreatedFrom:    lowerBound(filter.From),
+		CreatedTo:      upperBound(filter.To),
+		AfterCreatedAt: afterAt,
+		AfterID:        afterID,
+		RowLimit:       int32(limit),
+	})
+	if err != nil {
+		return nil, fmt.Errorf("select transactions: %w", err)
+	}
+	return transactionsFromRows(rows), nil
+}
+
+// ListForWallet returns up to limit of the Wallet's Transactions matching
+// filter, as source or destination, newest first, starting strictly after the
+// position when it is non-nil.
+func (s *LedgerStore) ListForWallet(ctx context.Context, walletID uuid.UUID, filter domain.TransactionFilter, after *domain.TransactionPosition, limit int) ([]domain.Transaction, error) {
+	afterAt, afterID := afterParams(after)
+	rows, err := s.q.ListWalletTransactions(ctx, sqlcgen.ListWalletTransactionsParams{
+		WalletID:       pgtype.UUID{Bytes: walletID, Valid: true},
+		Type:           optionalString(filter.Type),
+		Currency:       optionalString(filter.Currency),
+		CreatedFrom:    lowerBound(filter.From),
+		CreatedTo:      upperBound(filter.To),
+		AfterCreatedAt: afterAt,
+		AfterID:        afterID,
+		RowLimit:       int32(limit),
+	})
+	if err != nil {
+		return nil, fmt.Errorf("select wallet transactions: %w", err)
+	}
+	return transactionsFromRows(rows), nil
+}
+
+// afterParams returns the keyset-cursor query parameters for a position; both
+// are NULL, which disables the condition, when there is none.
+func afterParams(after *domain.TransactionPosition) (pgtype.Timestamptz, pgtype.UUID) {
+	if after == nil {
+		return pgtype.Timestamptz{}, pgtype.UUID{}
+	}
+	return pgtype.Timestamptz{Time: after.CreatedAt, Valid: true}, pgtype.UUID{Bytes: after.ID, Valid: true}
+}
+
+func optionalString[T ~string](v *T) *string {
+	if v == nil {
+		return nil
+	}
+	s := string(*v)
+	return &s
+}
+
+// lowerBound returns t as an inclusive lower bound at the microsecond
+// precision Postgres stores. A finer t is rounded up: truncating it would admit
+// a row that is older than the bound.
+func lowerBound(t *time.Time) pgtype.Timestamptz {
+	if t == nil {
+		return pgtype.Timestamptz{}
+	}
+	b := t.Truncate(time.Microsecond)
+	if b.Before(*t) {
+		b = b.Add(time.Microsecond)
+	}
+	return pgtype.Timestamptz{Time: b, Valid: true}
+}
+
+// upperBound returns t as an inclusive upper bound at the microsecond
+// precision Postgres stores. A finer t is rounded down, which keeps exactly the
+// rows at or before it.
+func upperBound(t *time.Time) pgtype.Timestamptz {
+	if t == nil {
+		return pgtype.Timestamptz{}
+	}
+	return pgtype.Timestamptz{Time: t.Truncate(time.Microsecond), Valid: true}
+}
+
+func transactionsFromRows(rows []sqlcgen.Transaction) []domain.Transaction {
+	txs := make([]domain.Transaction, len(rows))
+	for i, r := range rows {
+		txs[i] = transactionFromRow(r)
+	}
+	return txs
 }
 
 // ledgerTx is the work a LedgerStore transaction exposes to the service.
