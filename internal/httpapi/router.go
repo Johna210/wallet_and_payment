@@ -17,6 +17,7 @@ type Deps struct {
 	RequestTimeout time.Duration
 	MaxBodyBytes   int64
 	Wallets        WalletService
+	Ledger         LedgerService
 }
 
 // NewHandler returns the service's complete http.Handler.
@@ -36,6 +37,9 @@ func registerRoutes(mux *http.ServeMux, d Deps) {
 	mux.HandleFunc("GET /v1/wallets", handleListWallets(d.Wallets, ew))
 	mux.HandleFunc("GET /v1/wallets/{id}", handleGetWallet(d.Wallets, ew))
 	mux.HandleFunc("PATCH /v1/wallets/{id}/status", handleChangeWalletStatus(d.Wallets, ew))
+	mux.HandleFunc("POST /v1/wallets/{id}/deposits", handleDeposit(d.Ledger, ew))
+	mux.HandleFunc("GET /v1/transactions/{id}", handleGetTransaction(d.Ledger, ew))
+	mux.HandleFunc("GET /v1/deposits/{id}", handleGetTransactionOfType(d.Ledger, ew, domain.TypeDeposit))
 }
 
 // withMiddleware wraps mux in the middleware every route shares.

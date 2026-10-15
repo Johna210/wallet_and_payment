@@ -23,8 +23,11 @@ type Config struct {
 	HTTPIdleTimeout  time.Duration
 	RequestTimeout   time.Duration
 	MaxBodyBytes     int64
-	ShutdownDelay    time.Duration
-	ShutdownTimeout  time.Duration
+	// MaxOperationAmount is the largest amount one money-moving operation may
+	// carry, in minor units of the Wallet's Currency.
+	MaxOperationAmount int64
+	ShutdownDelay      time.Duration
+	ShutdownTimeout    time.Duration
 }
 
 // Load reads the configuration from the process environment.
@@ -37,17 +40,18 @@ func Load() (Config, error) {
 func LoadFrom(lookup func(string) (string, bool)) (Config, error) {
 	p := parser{lookup: lookup}
 	cfg := Config{
-		HTTPAddr:         p.str("HTTP_ADDR", ":8080"),
-		DatabaseURL:      p.required("DATABASE_URL"),
-		DBMaxConns:       int32(p.positiveInt("DB_MAX_CONNS", 10)),
-		LogLevel:         p.logLevel("LOG_LEVEL", slog.LevelInfo),
-		HTTPReadTimeout:  p.duration("HTTP_READ_TIMEOUT", 10*time.Second),
-		HTTPWriteTimeout: p.duration("HTTP_WRITE_TIMEOUT", 15*time.Second),
-		HTTPIdleTimeout:  p.duration("HTTP_IDLE_TIMEOUT", 60*time.Second),
-		RequestTimeout:   p.duration("REQUEST_TIMEOUT", 10*time.Second),
-		MaxBodyBytes:     int64(p.positiveInt("MAX_BODY_BYTES", 1<<20)),
-		ShutdownDelay:    p.duration("SHUTDOWN_DELAY", 5*time.Second),
-		ShutdownTimeout:  p.duration("SHUTDOWN_TIMEOUT", 20*time.Second),
+		HTTPAddr:           p.str("HTTP_ADDR", ":8080"),
+		DatabaseURL:        p.required("DATABASE_URL"),
+		DBMaxConns:         int32(p.positiveInt("DB_MAX_CONNS", 10)),
+		LogLevel:           p.logLevel("LOG_LEVEL", slog.LevelInfo),
+		HTTPReadTimeout:    p.duration("HTTP_READ_TIMEOUT", 10*time.Second),
+		HTTPWriteTimeout:   p.duration("HTTP_WRITE_TIMEOUT", 15*time.Second),
+		HTTPIdleTimeout:    p.duration("HTTP_IDLE_TIMEOUT", 60*time.Second),
+		RequestTimeout:     p.duration("REQUEST_TIMEOUT", 10*time.Second),
+		MaxBodyBytes:       int64(p.positiveInt("MAX_BODY_BYTES", 1<<20)),
+		MaxOperationAmount: p.positiveInt64("MAX_OPERATION_AMOUNT_MINOR", 100_000_000),
+		ShutdownDelay:      p.duration("SHUTDOWN_DELAY", 5*time.Second),
+		ShutdownTimeout:    p.duration("SHUTDOWN_TIMEOUT", 20*time.Second),
 	}
 
 	if cfg.HTTPWriteTimeout <= cfg.RequestTimeout {
@@ -99,6 +103,19 @@ func (p *parser) positiveInt(key string, def int) int {
 		return def
 	}
 	n, err := strconv.Atoi(v)
+	if err != nil || n <= 0 {
+		p.fail("%s must be a positive integer, got %q", key, v)
+		return def
+	}
+	return n
+}
+
+func (p *parser) positiveInt64(key string, def int64) int64 {
+	v, ok := p.value(key)
+	if !ok {
+		return def
+	}
+	n, err := strconv.ParseInt(v, 10, 64)
 	if err != nil || n <= 0 {
 		p.fail("%s must be a positive integer, got %q", key, v)
 		return def

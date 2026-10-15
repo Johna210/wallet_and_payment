@@ -77,8 +77,9 @@ func run(m *testing.M) int {
 // testConfig is the configuration the service runs with under test.
 func testConfig() config.Config {
 	return config.Config{
-		RequestTimeout: 5 * time.Second,
-		MaxBodyBytes:   1 << 20,
+		RequestTimeout:     5 * time.Second,
+		MaxBodyBytes:       1 << 20,
+		MaxOperationAmount: 100_000_000, // 1,000,000.00 in minor units
 	}
 }
 
@@ -151,6 +152,31 @@ func postJSON(t *testing.T, srv *httptest.Server, path, body string) *http.Respo
 	return resp
 }
 
+// postWithKey issues a POST with a JSON body and an Idempotency-Key header
+// (omitted when key is empty); the body is closed when the test ends.
+func postWithKey(t *testing.T, srv *httptest.Server, path, key, body string) *http.Response {
+	t.Helper()
+	resp, err := doPostWithKey(srv, path, key, body)
+	if err != nil {
+		t.Fatalf("POST %s: %v", path, err)
+	}
+	t.Cleanup(func() { _ = resp.Body.Close() })
+	return resp
+}
+
+// doPostWithKey is postWithKey without the testing.T, for use off the test goroutine.
+func doPostWithKey(srv *httptest.Server, path, key, body string) (*http.Response, error) {
+	req, err := http.NewRequest(http.MethodPost, srv.URL+path, strings.NewReader(body))
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("Content-Type", "application/json")
+	if key != "" {
+		req.Header.Set("Idempotency-Key", key)
+	}
+	return srv.Client().Do(req)
+}
+
 // patchJSON issues a PATCH with a JSON body; the body is closed when the test ends.
 func patchJSON(t *testing.T, srv *httptest.Server, path, body string) *http.Response {
 	t.Helper()
@@ -219,4 +245,14 @@ func decodeProblem(t *testing.T, resp *http.Response) problemBody {
 		t.Errorf("problem request_id %q does not match header %q", p.RequestID, resp.Header.Get("X-Request-ID"))
 	}
 	return p
+}
+
+// countRows returns how many rows table holds, read straight from the database.
+func countRows(t *testing.T, table string) int {
+	t.Helper()
+	var n int
+	if err := pool.QueryRow(context.Background(), "SELECT count(*) FROM "+table).Scan(&n); err != nil {
+		t.Fatalf("count %s: %v", table, err)
+	}
+	return n
 }
