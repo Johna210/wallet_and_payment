@@ -18,11 +18,13 @@ import (
 
 // NewHandler builds the complete HTTP handler over pool.
 func NewHandler(cfg config.Config, logger *slog.Logger, pool *pgxpool.Pool, readiness *httpapi.Readiness) http.Handler {
+	wallets := postgres.NewWalletStore(pool)
 	return httpapi.NewHandler(httpapi.Deps{
 		Logger:         logger,
 		Readiness:      readiness,
 		RequestTimeout: cfg.RequestTimeout,
 		MaxBodyBytes:   cfg.MaxBodyBytes,
-		Wallets:        service.NewWalletService(postgres.NewWalletStore(pool)),
+		Wallets:        service.NewWalletService(wallets),
+		Ledger:         service.NewLedgerService(postgres.NewLedgerStore(pool), wallets, logger, cfg.MaxOperationAmount),
 	})
 }
