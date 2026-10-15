@@ -79,3 +79,46 @@ func TestWalletTransitionToRejectsUnknownStatus(t *testing.T) {
 		t.Fatalf("err = %v, want code %s", err, CodeInvalidStatusTransition)
 	}
 }
+
+func TestWalletDebit(t *testing.T) {
+	cases := []struct {
+		name        string
+		status      WalletStatus
+		balance     int64
+		amount      int64
+		wantBalance int64
+		wantCode    Code // empty means the debit is allowed
+	}{
+		{"partial", WalletActive, 1000, 400, 600, ""},
+		{"exact balance leaves zero", WalletActive, 1000, 1000, 0, ""},
+		{"one over the balance", WalletActive, 1000, 1001, 0, CodeInsufficientFunds},
+		{"empty wallet", WalletActive, 0, 1, 0, CodeInsufficientFunds},
+		{"frozen", WalletFrozen, 1000, 1, 0, CodeWalletNotActive},
+		{"closed", WalletClosed, 0, 1, 0, CodeWalletNotActive},
+		{"frozen is reported before insufficient funds", WalletFrozen, 0, 1, 0, CodeWalletNotActive},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			w := walletWith(tc.status, tc.balance)
+
+			got, err := w.Debit(Money{Minor: tc.amount, Currency: "ETB"})
+
+			if tc.wantCode != "" {
+				de, ok := AsError(err)
+				if !ok || de.Code != tc.wantCode {
+					t.Fatalf("err = %v, want code %s", err, tc.wantCode)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			if got.Balance.Minor != tc.wantBalance {
+				t.Errorf("balance = %d, want %d", got.Balance.Minor, tc.wantBalance)
+			}
+			if w.Balance.Minor != tc.balance {
+				t.Errorf("Debit mutated the receiver: balance = %d, want %d", w.Balance.Minor, tc.balance)
+			}
+		})
+	}
+}

@@ -483,7 +483,7 @@ func TestGetDepositByID(t *testing.T) {
 func TestGetDepositForAnotherTransactionTypeIsNotFound(t *testing.T) {
 	srv := newServer(t)
 	w := createWallet(t, srv, uuid.NewString(), "EUR")
-	// Withdrawals have no endpoint yet; store one directly to prove the typed
+	// Store a Withdrawal directly (bypassing the API) to prove the typed
 	// route only answers for deposits.
 	var id string
 	if err := pool.QueryRow(context.Background(), `

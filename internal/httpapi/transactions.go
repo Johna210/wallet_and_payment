@@ -20,6 +20,7 @@ const (
 // LedgerService is the money-moving and Transaction use cases the transport calls.
 type LedgerService interface {
 	Deposit(ctx context.Context, walletID uuid.UUID, amount, idempotencyKey string) (service.MoneyMovement, error)
+	Withdraw(ctx context.Context, walletID uuid.UUID, amount, idempotencyKey string) (service.MoneyMovement, error)
 	GetTransaction(ctx context.Context, id uuid.UUID) (domain.TransactionDetail, error)
 	GetTransactionOfType(ctx context.Context, id uuid.UUID, t domain.TransactionType) (domain.TransactionDetail, error)
 }
@@ -124,7 +125,21 @@ type amountRequest struct {
 	Amount string `json:"amount"`
 }
 
+// handleDeposit and handleWithdrawal serve the single-Wallet money-moving
+// endpoints, which differ only in the use case they call.
 func handleDeposit(svc LedgerService, ew errorWriter) http.HandlerFunc {
+	return handleWalletMovement(ew, func(ctx context.Context, id uuid.UUID, amount, key string) (service.MoneyMovement, error) {
+		return svc.Deposit(ctx, id, amount, key)
+	})
+}
+
+func handleWithdrawal(svc LedgerService, ew errorWriter) http.HandlerFunc {
+	return handleWalletMovement(ew, func(ctx context.Context, id uuid.UUID, amount, key string) (service.MoneyMovement, error) {
+		return svc.Withdraw(ctx, id, amount, key)
+	})
+}
+
+func handleWalletMovement(ew errorWriter, move func(ctx context.Context, walletID uuid.UUID, amount, idempotencyKey string) (service.MoneyMovement, error)) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		key, err := idempotencyKey(r)
 		if err != nil {
@@ -146,7 +161,7 @@ func handleDeposit(svc LedgerService, ew errorWriter) http.HandlerFunc {
 			return
 		}
 
-		m, err := svc.Deposit(r.Context(), id, req.Amount, key)
+		m, err := move(r.Context(), id, req.Amount, key)
 		if err != nil {
 			ew.write(w, r, err)
 			return

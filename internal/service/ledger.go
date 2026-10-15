@@ -66,22 +66,48 @@ type MoneyMovement struct {
 	Replayed bool
 }
 
+// walletMove describes a Transaction that changes the Balance of one Wallet:
+// money comes in from outside the system (a Deposit) or goes out of it (a
+// Withdrawal).
+type walletMove struct {
+	typ      domain.TransactionType
+	name     string // for error messages
+	incoming bool
+	// apply enforces the business rules and returns the Wallet after the move.
+	apply func(domain.Wallet, domain.Money) (domain.Wallet, error)
+}
+
+var (
+	depositMove    = walletMove{typ: domain.TypeDeposit, name: "deposit", incoming: true, apply: domain.Wallet.Credit}
+	withdrawalMove = walletMove{typ: domain.TypeWithdrawal, name: "withdrawal", apply: domain.Wallet.Debit}
+)
+
 // Deposit adds amount (a decimal string in the Wallet's Currency) to the Wallet.
-func (s *LedgerService) Deposit(ctx context.Context, walletID uuid.UUID, amount, idempotencyKey string) (out MoneyMovement, err error) {
-	op := financialOp{typ: domain.TypeDeposit, walletIDs: []uuid.UUID{walletID}, amount: amount, key: idempotencyKey}
+func (s *LedgerService) Deposit(ctx context.Context, walletID uuid.UUID, amount, idempotencyKey string) (MoneyMovement, error) {
+	return s.moveOneWallet(ctx, depositMove, walletID, amount, idempotencyKey)
+}
+
+// Withdraw takes amount (a decimal string in the Wallet's Currency) out of the
+// Wallet, refusing any amount greater than its Balance.
+func (s *LedgerService) Withdraw(ctx context.Context, walletID uuid.UUID, amount, idempotencyKey string) (MoneyMovement, error) {
+	return s.moveOneWallet(ctx, withdrawalMove, walletID, amount, idempotencyKey)
+}
+
+func (s *LedgerService) moveOneWallet(ctx context.Context, move walletMove, walletID uuid.UUID, amount, idempotencyKey string) (out MoneyMovement, err error) {
+	op := financialOp{typ: move.typ, walletIDs: []uuid.UUID{walletID}, amount: amount, key: idempotencyKey}
 	defer func() { s.logOutcome(ctx, op, out, err) }()
 
 	// A Wallet's Currency never changes, so reading it without a lock is safe.
 	wallet, err := s.wallets.Get(ctx, walletID)
 	if err != nil {
-		return MoneyMovement{}, fmt.Errorf("deposit: %w", err)
+		return MoneyMovement{}, fmt.Errorf("%s: %w", move.name, err)
 	}
 	op.currency = wallet.Currency()
 	money, err := s.parseAmount(amount, wallet.Currency())
 	if err != nil {
-		return MoneyMovement{}, fmt.Errorf("deposit: %w", err)
+		return MoneyMovement{}, fmt.Errorf("%s: %w", move.name, err)
 	}
-	hash := requestHash(domain.TypeDeposit, walletID, money)
+	hash := requestHash(move.typ, walletID, money)
 
 	out, err = s.execute(ctx, idempotencyKey, hash, func(tx LedgerTx) (domain.TransactionDetail, error) {
 		locked, err := tx.LockWallet(ctx, walletID)
@@ -93,25 +119,32 @@ func (s *LedgerService) Deposit(ctx context.Context, walletID uuid.UUID, amount,
 		// replay (via ErrDuplicateIdempotencyKey), not judged against a Wallet
 		// its own Transaction has since changed. A rule failure below still
 		// rolls the Transaction back, so Rejections store nothing.
-		rec, err := tx.Record(ctx, domain.NewTransaction{
-			Type:                domain.TypeDeposit,
-			Amount:              money,
-			DestinationWalletID: &walletID,
-			IdempotencyKey:      idempotencyKey,
-			RequestHash:         hash,
-		})
+		newTx := domain.NewTransaction{
+			Type:           move.typ,
+			Amount:         money,
+			IdempotencyKey: idempotencyKey,
+			RequestHash:    hash,
+		}
+		entryAmount := money
+		if move.incoming {
+			newTx.DestinationWalletID = &walletID
+		} else {
+			newTx.SourceWalletID = &walletID
+			entryAmount.Minor = -money.Minor
+		}
+		rec, err := tx.Record(ctx, newTx)
 		if err != nil {
 			return domain.TransactionDetail{}, err
 		}
-		credited, err := locked.Credit(money)
+		moved, err := move.apply(locked, money)
 		if err != nil {
 			return domain.TransactionDetail{}, err
 		}
 		entry, err := tx.PostEntry(ctx, domain.NewLedgerEntry{
 			TransactionID: rec.ID,
 			WalletID:      walletID,
-			Amount:        money,
-			BalanceAfter:  credited.Balance,
+			Amount:        entryAmount,
+			BalanceAfter:  moved.Balance,
 		})
 		if err != nil {
 			return domain.TransactionDetail{}, err
@@ -119,7 +152,7 @@ func (s *LedgerService) Deposit(ctx context.Context, walletID uuid.UUID, amount,
 		return domain.TransactionDetail{Transaction: rec, Entries: []domain.LedgerEntry{entry}}, nil
 	})
 	if err != nil {
-		return MoneyMovement{}, fmt.Errorf("deposit: %w", err)
+		return MoneyMovement{}, fmt.Errorf("%s: %w", move.name, err)
 	}
 	return out, nil
 }
