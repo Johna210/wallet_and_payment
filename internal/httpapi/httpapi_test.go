@@ -194,8 +194,8 @@ func TestAccessLogUsesRoutePattern(t *testing.T) {
 	if line["bytes"].(float64) <= 0 {
 		t.Errorf("log bytes = %v, want > 0", line["bytes"])
 	}
-	if _, ok := line["duration"]; !ok {
-		t.Error("log has no duration")
+	if _, ok := line["duration_ms"]; !ok {
+		t.Error("log has no duration_ms")
 	}
 }
 

@@ -7,6 +7,7 @@ import (
 	"database/sql"
 	"fmt"
 	"log/slog"
+	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/jackc/pgx/v5/stdlib"
@@ -33,8 +34,9 @@ func NewPool(ctx context.Context, databaseURL string, maxConns int32) (*pgxpool.
 // Migrate applies every pending embedded migration over the pool. Running it
 // again when the schema is current is a no-op.
 func Migrate(ctx context.Context, pool *pgxpool.Pool, logger *slog.Logger) error {
+	// Closing this *sql.DB releases its handle only; the pool stays open.
 	db := stdlib.OpenDBFromPool(pool)
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 	return migrateDB(ctx, db, logger)
 }
 
@@ -51,7 +53,7 @@ func migrateDB(ctx context.Context, db *sql.DB, logger *slog.Logger) error {
 		logger.InfoContext(ctx, "migration applied",
 			slog.Int64("version", r.Source.Version),
 			slog.String("file", r.Source.Path),
-			slog.Duration("duration", r.Duration))
+			slog.Float64("duration_ms", durationMS(r.Duration)))
 	}
 	version, err := provider.GetDBVersion(ctx)
 	if err != nil {
@@ -61,3 +63,5 @@ func migrateDB(ctx context.Context, db *sql.DB, logger *slog.Logger) error {
 		slog.Int64("version", version), slog.Int("applied", len(results)))
 	return nil
 }
+
+func durationMS(d time.Duration) float64 { return float64(d.Microseconds()) / 1000 }

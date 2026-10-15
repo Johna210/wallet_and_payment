@@ -114,7 +114,7 @@ func accessLog(logger *slog.Logger) func(http.Handler) http.Handler {
 				slog.String("method", r.Method),
 				slog.String("route", rt.pattern),
 				slog.Int("status", status),
-				slog.Duration("duration", time.Since(start)),
+				slog.Float64("duration_ms", float64(time.Since(start).Microseconds())/1000),
 				slog.Int("bytes", rec.bytes),
 			)
 		})

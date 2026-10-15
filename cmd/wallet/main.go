@@ -100,7 +100,7 @@ func serve(ctx context.Context, cfg config.Config, logger *slog.Logger) error {
 	case <-ctx.Done():
 	}
 
-	logger.Info("shutdown started: readiness now failing", slog.Duration("drain_delay", cfg.ShutdownDelay))
+	logger.Info("shutdown started: readiness now failing", slog.String("drain_delay", cfg.ShutdownDelay.String()))
 	readiness.SetShuttingDown()
 	time.Sleep(cfg.ShutdownDelay)
 
