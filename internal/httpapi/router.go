@@ -33,6 +33,7 @@ func registerRoutes(mux *http.ServeMux, d Deps) {
 
 	ew := errorWriter{logger: d.Logger}
 	mux.HandleFunc("POST /v1/wallets", handleCreateWallet(d.Wallets, ew))
+	mux.HandleFunc("GET /v1/wallets", handleListWallets(d.Wallets, ew))
 	mux.HandleFunc("GET /v1/wallets/{id}", handleGetWallet(d.Wallets, ew))
 }
 

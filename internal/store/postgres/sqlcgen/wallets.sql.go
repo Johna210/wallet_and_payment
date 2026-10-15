@@ -9,6 +9,7 @@ import (
 	"context"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5/pgtype"
 )
 
 const createWallet = `-- name: CreateWallet :one
@@ -55,4 +56,59 @@ func (q *Queries) GetWallet(ctx context.Context, id uuid.UUID) (Wallet, error) {
 		&i.UpdatedAt,
 	)
 	return i, err
+}
+
+const listWallets = `-- name: ListWallets :many
+SELECT id, user_id, currency, balance, status, created_at, updated_at FROM wallets
+WHERE ($1::uuid IS NULL OR user_id = $1)
+  AND ($2::text IS NULL OR status = $2)
+  AND ($3::text IS NULL OR currency = $3)
+  AND ($4::timestamptz IS NULL
+       OR (created_at, id) < ($4::timestamptz, $5::uuid))
+ORDER BY created_at DESC, id DESC
+LIMIT $6
+`
+
+type ListWalletsParams struct {
+	UserID         pgtype.UUID
+	Status         *string
+	Currency       *string
+	AfterCreatedAt pgtype.Timestamptz
+	AfterID        pgtype.UUID
+	RowLimit       int32
+}
+
+func (q *Queries) ListWallets(ctx context.Context, arg ListWalletsParams) ([]Wallet, error) {
+	rows, err := q.db.Query(ctx, listWallets,
+		arg.UserID,
+		arg.Status,
+		arg.Currency,
+		arg.AfterCreatedAt,
+		arg.AfterID,
+		arg.RowLimit,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []Wallet
+	for rows.Next() {
+		var i Wallet
+		if err := rows.Scan(
+			&i.ID,
+			&i.UserID,
+			&i.Currency,
+			&i.Balance,
+			&i.Status,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
 }

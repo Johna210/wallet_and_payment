@@ -15,6 +15,7 @@ import (
 type WalletRepository interface {
 	Create(ctx context.Context, userID uuid.UUID, currency domain.Currency) (domain.Wallet, error)
 	Get(ctx context.Context, id uuid.UUID) (domain.Wallet, error)
+	List(ctx context.Context, filter domain.WalletFilter, after *domain.WalletPosition, limit int) ([]domain.Wallet, error)
 }
 
 // WalletService manages Wallets.
@@ -43,4 +44,23 @@ func (s *WalletService) Get(ctx context.Context, id uuid.UUID) (domain.Wallet, e
 		return domain.Wallet{}, fmt.Errorf("get wallet: %w", err)
 	}
 	return w, nil
+}
+
+// List returns up to limit Wallets matching filter, newest first, starting
+// strictly after the position when it is non-nil. limit must be positive.
+func (s *WalletService) List(ctx context.Context, filter domain.WalletFilter, after *domain.WalletPosition, limit int) (domain.WalletPage, error) {
+	if limit < 1 {
+		return domain.WalletPage{}, fmt.Errorf("list wallets: limit must be positive, got %d", limit)
+	}
+	// Ask for one extra row: its presence is how we know another page exists.
+	ws, err := s.repo.List(ctx, filter, after, limit+1)
+	if err != nil {
+		return domain.WalletPage{}, fmt.Errorf("list wallets: %w", err)
+	}
+	if len(ws) <= limit {
+		return domain.WalletPage{Wallets: ws}, nil
+	}
+	ws = ws[:limit]
+	last := ws[limit-1]
+	return domain.WalletPage{Wallets: ws, Next: &domain.WalletPosition{CreatedAt: last.CreatedAt, ID: last.ID}}, nil
 }
