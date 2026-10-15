@@ -20,6 +20,10 @@ type fakePinger struct{ err error }
 
 func (f fakePinger) Ping(context.Context) error { return f.err }
 
+type noopObserver struct{}
+
+func (noopObserver) ObserveRequest(string, string, int, time.Duration) {}
+
 type harness struct {
 	handler   http.Handler
 	readiness *Readiness
@@ -36,6 +40,8 @@ func newHarness(t *testing.T, db Pinger, extra func(*http.ServeMux, Deps)) harne
 		Readiness:      NewReadiness(db),
 		RequestTimeout: time.Second,
 		MaxBodyBytes:   64,
+		Metrics:        http.NotFoundHandler(),
+		Requests:       noopObserver{},
 	}
 	mux := http.NewServeMux()
 	registerRoutes(mux, d)

@@ -5,6 +5,7 @@ import (
 	"log/slog"
 	"net/http"
 	"runtime/debug"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -117,6 +118,41 @@ func accessLog(logger *slog.Logger) func(http.Handler) http.Handler {
 				slog.Float64("duration_ms", float64(time.Since(start).Microseconds())/1000),
 				slog.Int("bytes", rec.bytes),
 			)
+		})
+	}
+}
+
+// RequestObserver records one handled request. route is the matched pattern
+// without its method, or unmatchedRoute, so its values stay bounded.
+type RequestObserver interface {
+	ObserveRequest(method, route string, status int, d time.Duration)
+}
+
+// unmatchedRoute labels requests that matched no route, whatever their path.
+const unmatchedRoute = "unmatched"
+
+// instrument reports every request to obs. It sits inside accessLog, which
+// supplies the matched route, and outside recoverPanic, so a recovered panic
+// is counted as the 500 it became.
+func instrument(obs RequestObserver) func(http.Handler) http.Handler {
+	return func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			start := time.Now()
+			rec := &statusRecorder{ResponseWriter: w}
+			next.ServeHTTP(rec, r)
+
+			status := rec.status
+			if status == 0 {
+				status = http.StatusOK
+			}
+			label := unmatchedRoute
+			if rt, ok := r.Context().Value(routeKey).(*route); ok && rt.pattern != "" {
+				// A pattern is "METHOD /path"; the method has its own label.
+				if _, path, found := strings.Cut(rt.pattern, " "); found {
+					label = path
+				}
+			}
+			obs.ObserveRequest(r.Method, label, status, time.Since(start))
 		})
 	}
 }

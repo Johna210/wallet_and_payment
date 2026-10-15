@@ -18,6 +18,9 @@ type Deps struct {
 	MaxBodyBytes   int64
 	Wallets        WalletService
 	Ledger         LedgerService
+	// Metrics serves GET /metrics; Requests records every handled request.
+	Metrics  http.Handler
+	Requests RequestObserver
 }
 
 // NewHandler returns the service's complete http.Handler.
@@ -31,6 +34,7 @@ func NewHandler(d Deps) http.Handler {
 func registerRoutes(mux *http.ServeMux, d Deps) {
 	mux.HandleFunc("GET /healthz", handleHealthz)
 	mux.HandleFunc("GET /readyz", handleReadyz(d.Readiness, d.Logger))
+	mux.Handle("GET /metrics", d.Metrics)
 
 	ew := errorWriter{logger: d.Logger}
 	mux.HandleFunc("POST /v1/wallets", handleCreateWallet(d.Wallets, ew))
@@ -53,6 +57,7 @@ func withMiddleware(mux *http.ServeMux, d Deps) http.Handler {
 	return chain(dispatch(mux),
 		requestID,
 		accessLog(d.Logger),
+		instrument(d.Requests),
 		recoverPanic(d.Logger),
 		timeout(d.RequestTimeout),
 		limitBody(d.MaxBodyBytes),

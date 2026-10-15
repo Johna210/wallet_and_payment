@@ -12,6 +12,7 @@ import (
 
 	"github.com/Johna210/wallet_and_payment/internal/httpapi"
 	"github.com/Johna210/wallet_and_payment/internal/platform/config"
+	"github.com/Johna210/wallet_and_payment/internal/platform/metrics"
 	"github.com/Johna210/wallet_and_payment/internal/service"
 	"github.com/Johna210/wallet_and_payment/internal/store/postgres"
 )
@@ -19,12 +20,15 @@ import (
 // NewHandler builds the complete HTTP handler over pool.
 func NewHandler(cfg config.Config, logger *slog.Logger, pool *pgxpool.Pool, readiness *httpapi.Readiness) http.Handler {
 	wallets := postgres.NewWalletStore(pool)
+	m := metrics.New(pool)
 	return httpapi.NewHandler(httpapi.Deps{
 		Logger:         logger,
 		Readiness:      readiness,
 		RequestTimeout: cfg.RequestTimeout,
 		MaxBodyBytes:   cfg.MaxBodyBytes,
 		Wallets:        service.NewWalletService(wallets),
-		Ledger:         service.NewLedgerService(postgres.NewLedgerStore(pool), wallets, logger, cfg.MaxOperationAmount),
+		Ledger:         service.NewLedgerService(postgres.NewLedgerStore(pool), wallets, logger, cfg.MaxOperationAmount, m),
+		Metrics:        m.Handler(),
+		Requests:       m,
 	})
 }
