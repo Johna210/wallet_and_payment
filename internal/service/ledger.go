@@ -400,7 +400,7 @@ func (s *LedgerService) ListTransactions(ctx context.Context, filter domain.Tran
 	if err != nil {
 		return domain.TransactionPage{}, fmt.Errorf("list transactions: %w", err)
 	}
-	return transactionPage(txs, limit), nil
+	return trimToPage(txs, limit), nil
 }
 
 // ListWalletTransactions returns up to limit of the Wallet's Transactions
@@ -420,12 +420,12 @@ func (s *LedgerService) ListWalletTransactions(ctx context.Context, walletID uui
 	if err != nil {
 		return domain.TransactionPage{}, fmt.Errorf("list wallet transactions: %w", err)
 	}
-	return transactionPage(txs, limit), nil
+	return trimToPage(txs, limit), nil
 }
 
-// transactionPage trims txs, fetched with one row beyond limit, to a page and
-// points Next at its last row when that extra row shows more follow.
-func transactionPage(txs []domain.Transaction, limit int) domain.TransactionPage {
+// trimToPage trims txs, fetched with one row beyond limit, to a page and points
+// Next at its last row when that extra row shows more follow.
+func trimToPage(txs []domain.Transaction, limit int) domain.TransactionPage {
 	if len(txs) <= limit {
 		return domain.TransactionPage{Transactions: txs}
 	}

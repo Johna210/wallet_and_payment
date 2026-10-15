@@ -134,7 +134,8 @@ func explain(t *testing.T, q recordedQuery, generic bool) planNode {
 // seedLargeHistory bulk-inserts 30,000 Transactions across 60 Wallets straight
 // into the database and analyses the tables, so the planner sees the volume and
 // distribution of a real deployment instead of an empty table. It returns the
-// Wallet ids.
+// Wallet ids. The rows carry no Ledger Entries (ADR-0001): only the listing
+// plans are examined here, and the invariant is covered by the money-moving tests.
 func seedLargeHistory(t *testing.T) []string {
 	t.Helper()
 	ctx := context.Background()
@@ -181,6 +182,14 @@ func seedLargeHistory(t *testing.T) []string {
 // that records its statements, then asks Postgres how it would run each one
 // against a realistically large table, both for the request's own values and as
 // the generic plan a cached prepared statement can switch to.
+//
+// This is a deliberate exception to the rule that tests assert external
+// behaviour only (spec #1, Testing Decisions): the acceptance criteria of issue
+// #9 require that "queries use the indexes from the spec schema (no sequential
+// scans on the wallet-scoped path)", and a response body cannot show that. The
+// test is still coupled to no SQL text: it explains whatever the handler sent.
+// It does read Postgres's EXPLAIN output, so it is pinned to the Postgres major
+// version the integration tests start (see main_test.go).
 func TestTransactionListQueriesUseIndexes(t *testing.T) {
 	truncate(t)
 	rec := &queryRecorder{}
@@ -200,7 +209,7 @@ func TestTransactionListQueriesUseIndexes(t *testing.T) {
 	statement := "/v1/wallets/" + wallet + "/transactions"
 	cursor := *listTransactions(t, srv, statement+"?limit=3").NextCursor
 	now := time.Now().UTC()
-	filtered := query(
+	filtered := queryString(
 		"type", "TRANSFER", "currency", "ETB",
 		"from", now.Add(-25000*time.Second).Format(time.RFC3339Nano),
 		"to", now.Add(-100*time.Second).Format(time.RFC3339Nano),
@@ -219,10 +228,10 @@ func TestTransactionListQueriesUseIndexes(t *testing.T) {
 		seeks bool
 	}{
 		{"statement", statement, walletIndexes, false},
-		{"statement paged", statement + query("cursor", cursor), walletIndexes, true},
+		{"statement paged", statement + queryString("cursor", cursor), walletIndexes, true},
 		{"statement filtered and paged", statement + filtered, walletIndexes, true},
 		{"global", "/v1/transactions", globalIndex, false},
-		{"global paged", "/v1/transactions" + query("cursor", cursor), globalIndex, true},
+		{"global paged", "/v1/transactions" + queryString("cursor", cursor), globalIndex, true},
 		{"global filtered and paged", "/v1/transactions" + filtered, globalIndex, true},
 	}
 	for _, tc := range requests {

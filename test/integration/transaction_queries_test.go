@@ -3,7 +3,6 @@
 package integration
 
 import (
-	"encoding/base64"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -188,8 +187,8 @@ func TestWalletStatementWithMalformedWalletIDIsRejected(t *testing.T) {
 	}
 }
 
-// query builds a query string from key, value pairs, escaping the values.
-func query(kv ...string) string {
+// queryString builds a query string from key, value pairs, escaping the values.
+func queryString(kv ...string) string {
 	v := url.Values{}
 	for i := 0; i < len(kv); i += 2 {
 		v.Set(kv[i], kv[i+1])
@@ -287,27 +286,27 @@ func TestListTransactionsFilters(t *testing.T) {
 
 	runFilterCases(t, srv, h, "/v1/transactions", []filterCase{
 		{"no filters", "", []int{5, 4, 3, 2, 1, 0}},
-		{"type deposit", query("type", "DEPOSIT"), []int{5, 1, 0}},
-		{"type withdrawal", query("type", "WITHDRAWAL"), []int{2}},
-		{"type transfer", query("type", "TRANSFER"), []int{4, 3}},
-		{"currency ETB", query("currency", "ETB"), []int{5, 3, 2, 0}},
-		{"currency USD", query("currency", "USD"), []int{4, 1}},
-		{"currency with no transactions", query("currency", "EUR"), nil},
-		{"type and currency", query("type", "TRANSFER", "currency", "USD"), []int{4}},
-		{"from is inclusive", query("from", h.at(2)), []int{5, 4, 3, 2}},
-		{"to is inclusive", query("to", h.at(2)), []int{2, 1, 0}},
-		{"from and to", query("from", h.at(1), "to", h.at(3)), []int{3, 2, 1}},
-		{"from equal to to is one instant", query("from", h.at(2), "to", h.at(2)), []int{2}},
-		{"from and to in a non-UTC offset", query("from", inOffset(t, h.at(1)), "to", inOffset(t, h.at(3))), []int{3, 2, 1}},
+		{"type deposit", queryString("type", "DEPOSIT"), []int{5, 1, 0}},
+		{"type withdrawal", queryString("type", "WITHDRAWAL"), []int{2}},
+		{"type transfer", queryString("type", "TRANSFER"), []int{4, 3}},
+		{"currency ETB", queryString("currency", "ETB"), []int{5, 3, 2, 0}},
+		{"currency USD", queryString("currency", "USD"), []int{4, 1}},
+		{"currency with no transactions", queryString("currency", "EUR"), nil},
+		{"type and currency", queryString("type", "TRANSFER", "currency", "USD"), []int{4}},
+		{"from is inclusive", queryString("from", h.at(2)), []int{5, 4, 3, 2}},
+		{"to is inclusive", queryString("to", h.at(2)), []int{2, 1, 0}},
+		{"from and to", queryString("from", h.at(1), "to", h.at(3)), []int{3, 2, 1}},
+		{"from equal to to is one instant", queryString("from", h.at(2), "to", h.at(2)), []int{2}},
+		{"from and to in a non-UTC offset", queryString("from", inOffset(t, h.at(1)), "to", inOffset(t, h.at(3))), []int{3, 2, 1}},
 		// Postgres keeps microseconds; a bound finer than that must not widen the range.
-		{"from a fraction of a microsecond after tx 2", query("from", shifted(t, h.at(2), 500*time.Nanosecond)), []int{5, 4, 3}},
-		{"to a fraction of a microsecond after tx 2", query("to", shifted(t, h.at(2), 500*time.Nanosecond)), []int{2, 1, 0}},
-		{"to a fraction of a microsecond before tx 2", query("to", shifted(t, h.at(2), -500*time.Nanosecond)), []int{1, 0}},
-		{"from without fractional seconds", query("from", "2000-01-01T00:00:00Z"), []int{5, 4, 3, 2, 1, 0}},
-		{"to in the past", query("to", "2000-01-01T00:00:00Z"), nil},
-		{"from in the future", query("from", "2999-01-01T00:00:00Z"), nil},
-		{"all four", query("type", "DEPOSIT", "currency", "ETB", "from", h.at(0), "to", h.at(4)), []int{0}},
-		{"all four, nothing left", query("type", "WITHDRAWAL", "currency", "USD", "from", h.at(0), "to", h.at(5)), nil},
+		{"from a fraction of a microsecond after tx 2", queryString("from", shifted(t, h.at(2), 500*time.Nanosecond)), []int{5, 4, 3}},
+		{"to a fraction of a microsecond after tx 2", queryString("to", shifted(t, h.at(2), 500*time.Nanosecond)), []int{2, 1, 0}},
+		{"to a fraction of a microsecond before tx 2", queryString("to", shifted(t, h.at(2), -500*time.Nanosecond)), []int{1, 0}},
+		{"from without fractional seconds", queryString("from", "2000-01-01T00:00:00Z"), []int{5, 4, 3, 2, 1, 0}},
+		{"to in the past", queryString("to", "2000-01-01T00:00:00Z"), nil},
+		{"from in the future", queryString("from", "2999-01-01T00:00:00Z"), nil},
+		{"all four", queryString("type", "DEPOSIT", "currency", "ETB", "from", h.at(0), "to", h.at(4)), []int{0}},
+		{"all four, nothing left", queryString("type", "WITHDRAWAL", "currency", "USD", "from", h.at(0), "to", h.at(5)), nil},
 	})
 }
 
@@ -318,25 +317,25 @@ func TestWalletStatementFilters(t *testing.T) {
 	t.Run("source side of a transfer", func(t *testing.T) {
 		runFilterCases(t, srv, h, "/v1/wallets/"+h.etb.ID+"/transactions", []filterCase{
 			{"no filters", "", []int{3, 2, 0}},
-			{"type deposit", query("type", "DEPOSIT"), []int{0}},
-			{"type withdrawal", query("type", "WITHDRAWAL"), []int{2}},
-			{"type transfer", query("type", "TRANSFER"), []int{3}},
-			{"its own currency", query("currency", "ETB"), []int{3, 2, 0}},
-			{"another currency", query("currency", "USD"), nil},
-			{"from", query("from", h.at(2)), []int{3, 2}},
-			{"to", query("to", h.at(2)), []int{2, 0}},
-			{"from and to", query("from", h.at(1), "to", h.at(3)), []int{3, 2}},
-			{"from and to in a non-UTC offset", query("from", inOffset(t, h.at(1)), "to", inOffset(t, h.at(3))), []int{3, 2}},
-			{"type, currency and range", query("type", "TRANSFER", "currency", "ETB", "from", h.at(0), "to", h.at(5)), []int{3}},
+			{"type deposit", queryString("type", "DEPOSIT"), []int{0}},
+			{"type withdrawal", queryString("type", "WITHDRAWAL"), []int{2}},
+			{"type transfer", queryString("type", "TRANSFER"), []int{3}},
+			{"its own currency", queryString("currency", "ETB"), []int{3, 2, 0}},
+			{"another currency", queryString("currency", "USD"), nil},
+			{"from", queryString("from", h.at(2)), []int{3, 2}},
+			{"to", queryString("to", h.at(2)), []int{2, 0}},
+			{"from and to", queryString("from", h.at(1), "to", h.at(3)), []int{3, 2}},
+			{"from and to in a non-UTC offset", queryString("from", inOffset(t, h.at(1)), "to", inOffset(t, h.at(3))), []int{3, 2}},
+			{"type, currency and range", queryString("type", "TRANSFER", "currency", "ETB", "from", h.at(0), "to", h.at(5)), []int{3}},
 		})
 	})
 	t.Run("destination side of a transfer", func(t *testing.T) {
 		runFilterCases(t, srv, h, "/v1/wallets/"+h.etb2.ID+"/transactions", []filterCase{
 			{"no filters", "", []int{5, 3}},
-			{"type deposit", query("type", "DEPOSIT"), []int{5}},
-			{"type transfer", query("type", "TRANSFER"), []int{3}},
-			{"type withdrawal", query("type", "WITHDRAWAL"), nil},
-			{"to before its last deposit", query("to", h.at(4)), []int{3}},
+			{"type deposit", queryString("type", "DEPOSIT"), []int{5}},
+			{"type transfer", queryString("type", "TRANSFER"), []int{3}},
+			{"type withdrawal", queryString("type", "WITHDRAWAL"), nil},
+			{"to before its last deposit", queryString("to", h.at(4)), []int{3}},
 		})
 	})
 }
@@ -349,23 +348,23 @@ func TestListTransactionsRejectsInvalidFilters(t *testing.T) {
 		query      string
 		wantFields []string
 	}{
-		{"type unknown", query("type", "REFUND"), []string{"type"}},
-		{"type lower-case", query("type", "deposit"), []string{"type"}},
-		{"type empty", query("type", ""), []string{"type"}},
-		{"from not a time", query("from", "yesterday"), []string{"from"}},
-		{"from a date only", query("from", "2026-10-15"), []string{"from"}},
-		{"from without a zone", query("from", "2026-10-15T10:00:00"), []string{"from"}},
-		{"from impossible date", query("from", "2026-02-30T10:00:00Z"), []string{"from"}},
-		{"from empty", query("from", ""), []string{"from"}},
-		{"to not a time", query("to", "tomorrow"), []string{"to"}},
-		{"to without a zone", query("to", "2026-10-15T10:00:00"), []string{"to"}},
-		{"to empty", query("to", ""), []string{"to"}},
-		{"from after to", query("from", h.at(3), "to", h.at(2)), []string{"from"}},
-		{"from after to across offsets", query("from", "2026-10-15T12:00:00Z", "to", "2026-10-15T14:00:00+03:00"), []string{"from"}},
-		{"currency unsupported", query("currency", "GBP"), []string{"currency"}},
-		{"currency lower-case", query("currency", "etb"), []string{"currency"}},
-		{"currency empty", query("currency", ""), []string{"currency"}},
-		{"every problem reported", query("type", "x", "from", "x", "to", "x", "currency", "x"), []string{"type", "from", "to", "currency"}},
+		{"type unknown", queryString("type", "REFUND"), []string{"type"}},
+		{"type lower-case", queryString("type", "deposit"), []string{"type"}},
+		{"type empty", queryString("type", ""), []string{"type"}},
+		{"from not a time", queryString("from", "yesterday"), []string{"from"}},
+		{"from a date only", queryString("from", "2026-10-15"), []string{"from"}},
+		{"from without a zone", queryString("from", "2026-10-15T10:00:00"), []string{"from"}},
+		{"from impossible date", queryString("from", "2026-02-30T10:00:00Z"), []string{"from"}},
+		{"from empty", queryString("from", ""), []string{"from"}},
+		{"to not a time", queryString("to", "tomorrow"), []string{"to"}},
+		{"to without a zone", queryString("to", "2026-10-15T10:00:00"), []string{"to"}},
+		{"to empty", queryString("to", ""), []string{"to"}},
+		{"from after to", queryString("from", h.at(3), "to", h.at(2)), []string{"from"}},
+		{"from after to across offsets", queryString("from", "2026-10-15T12:00:00Z", "to", "2026-10-15T14:00:00+03:00"), []string{"from"}},
+		{"currency unsupported", queryString("currency", "GBP"), []string{"currency"}},
+		{"currency lower-case", queryString("currency", "etb"), []string{"currency"}},
+		{"currency empty", queryString("currency", ""), []string{"currency"}},
+		{"every problem reported", queryString("type", "x", "from", "x", "to", "x", "currency", "x"), []string{"type", "from", "to", "currency"}},
 	}
 	for _, path := range []string{"/v1/transactions", "/v1/wallets/" + h.etb.ID + "/transactions"} {
 		for _, tc := range cases {
@@ -582,7 +581,7 @@ func TestTransactionPaginationKeepsFilters(t *testing.T) {
 
 	for name, path := range map[string]string{"statement": b.statementPath(), "global": "/v1/transactions"} {
 		t.Run(name, func(t *testing.T) {
-			pages := pageThroughTransactions(t, srv, path, query("type", "TRANSFER", "limit", "4"))
+			pages := pageThroughTransactions(t, srv, path, queryString("type", "TRANSFER", "limit", "4"))
 
 			if got, want := pagedIDs(pages), idsNewestFirst(transfers...); !slices.Equal(got, want) {
 				t.Errorf("paged ids = %v, want %v", got, want)
@@ -633,25 +632,24 @@ func TestTransactionListsAcceptLimitBounds(t *testing.T) {
 func TestTransactionListsRejectInvalidLimitAndCursor(t *testing.T) {
 	srv := newServer(t)
 	wallet := createWallet(t, srv, uuid.NewString(), "ETB")
-	forged := func(payload string) string { return base64.RawURLEncoding.EncodeToString([]byte(payload)) }
 	cases := []struct {
 		name       string
 		query      string
 		wantFields []string
 	}{
-		{"limit above max", query("limit", "101"), []string{"limit"}},
-		{"limit zero", query("limit", "0"), []string{"limit"}},
-		{"limit negative", query("limit", "-1"), []string{"limit"}},
-		{"limit signed", query("limit", "+5"), []string{"limit"}},
-		{"limit not a number", query("limit", "ten"), []string{"limit"}},
-		{"limit empty", query("limit", ""), []string{"limit"}},
-		{"cursor garbage", query("cursor", "!!!"), []string{"cursor"}},
-		{"cursor not ours", query("cursor", forged(`{}`)), []string{"cursor"}},
-		{"cursor with a nil id", query("cursor", forged(`{"t":1,"id":"00000000-0000-0000-0000-000000000000"}`)), []string{"cursor"}},
-		{"cursor with out-of-range time", query("cursor", forged(`{"t":9223372036854775807,"id":"`+uuid.NewString()+`"}`)), []string{"cursor"}},
-		{"cursor with negative time", query("cursor", forged(`{"t":-9223372036854775808,"id":"`+uuid.NewString()+`"}`)), []string{"cursor"}},
-		{"cursor empty", query("cursor", ""), []string{"cursor"}},
-		{"every problem reported", query("type", "x", "from", "x", "to", "x", "currency", "x", "limit", "0", "cursor", "!"),
+		{"limit above max", queryString("limit", "101"), []string{"limit"}},
+		{"limit zero", queryString("limit", "0"), []string{"limit"}},
+		{"limit negative", queryString("limit", "-1"), []string{"limit"}},
+		{"limit signed", queryString("limit", "+5"), []string{"limit"}},
+		{"limit not a number", queryString("limit", "ten"), []string{"limit"}},
+		{"limit empty", queryString("limit", ""), []string{"limit"}},
+		{"cursor garbage", queryString("cursor", "!!!"), []string{"cursor"}},
+		{"cursor not ours", queryString("cursor", forgedCursor(`{}`)), []string{"cursor"}},
+		{"cursor with a nil id", queryString("cursor", forgedCursor(`{"t":1,"id":"00000000-0000-0000-0000-000000000000"}`)), []string{"cursor"}},
+		{"cursor with out-of-range time", queryString("cursor", forgedCursor(`{"t":9223372036854775807,"id":"`+uuid.NewString()+`"}`)), []string{"cursor"}},
+		{"cursor with negative time", queryString("cursor", forgedCursor(`{"t":-9223372036854775808,"id":"`+uuid.NewString()+`"}`)), []string{"cursor"}},
+		{"cursor empty", queryString("cursor", ""), []string{"cursor"}},
+		{"every problem reported", queryString("type", "x", "from", "x", "to", "x", "currency", "x", "limit", "0", "cursor", "!"),
 			[]string{"type", "from", "to", "currency", "limit", "cursor"}},
 	}
 	for _, path := range []string{"/v1/transactions", "/v1/wallets/" + wallet.ID + "/transactions"} {
@@ -667,6 +665,60 @@ func TestTransactionListsRejectInvalidLimitAndCursor(t *testing.T) {
 				}
 				if got := p.fieldNames(); !slices.Equal(got, tc.wantFields) {
 					t.Errorf("fields = %v, want %v", got, tc.wantFields)
+				}
+			})
+		}
+	}
+}
+
+// TestTransactionPaginationBreaksTiesOnID gives every Transaction the same
+// created_at, so only the id decides the order and the cursor position. Paging
+// by created_at alone would skip or repeat rows here.
+func TestTransactionPaginationBreaksTiesOnID(t *testing.T) {
+	srv := newServer(t)
+	b := newBusyWallet(t, srv) // 10 in the statement (both halves), 11 overall
+	if _, err := pool.Exec(t.Context(), `UPDATE transactions SET created_at = '2026-01-02T03:04:05.678901Z'`); err != nil {
+		t.Fatalf("make created_at equal: %v", err)
+	}
+	newestFirst := func(ids []string) []string {
+		sorted := slices.Clone(ids)
+		slices.Sort(sorted) // canonical lower-case UUIDs order like their bytes
+		slices.Reverse(sorted)
+		return sorted
+	}
+	all := func() []string {
+		rows, err := pool.Query(t.Context(), `SELECT id::text FROM transactions`)
+		if err != nil {
+			t.Fatalf("list ids: %v", err)
+		}
+		defer rows.Close()
+		var ids []string
+		for rows.Next() {
+			var id string
+			if err := rows.Scan(&id); err != nil {
+				t.Fatalf("scan: %v", err)
+			}
+			ids = append(ids, id)
+		}
+		return ids
+	}()
+	if len(all) != 11 {
+		t.Fatalf("setup left %d transactions, want 11", len(all))
+	}
+
+	for name, tc := range map[string]struct {
+		path string
+		want []string
+	}{
+		"global":    {"/v1/transactions", newestFirst(all)},
+		"statement": {b.statementPath(), newestFirst(transactionIDs(b.history))},
+	} {
+		for _, limit := range []string{"1", "3"} {
+			t.Run(name+" limit "+limit, func(t *testing.T) {
+				pages := pageThroughTransactions(t, srv, tc.path, "?limit="+limit)
+
+				if got := pagedIDs(pages); !slices.Equal(got, tc.want) {
+					t.Errorf("paged ids = %v, want %v", got, tc.want)
 				}
 			})
 		}

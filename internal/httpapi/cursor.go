@@ -17,17 +17,17 @@ var maxCursorMicros = time.Date(9999, 12, 31, 23, 59, 59, 0, time.UTC).UnixMicro
 
 var errInvalidCursor = errors.New("is not a valid cursor")
 
-// cursor is the wire form of a listing position: the (created_at, id) of the
+// cursorPayload is the wire form of a listing position: the (created_at, id) of the
 // last item on a page. Clients treat the encoded string as opaque. Time is in
 // microseconds, the precision Postgres stores, so a position survives the round
 // trip exactly.
-type cursor struct {
+type cursorPayload struct {
 	Micros int64     `json:"t"`
 	ID     uuid.UUID `json:"id"`
 }
 
 func encodeCursor(createdAt time.Time, id uuid.UUID) string {
-	b, _ := json.Marshal(cursor{Micros: createdAt.UnixMicro(), ID: id})
+	b, _ := json.Marshal(cursorPayload{Micros: createdAt.UnixMicro(), ID: id})
 	return base64.RawURLEncoding.EncodeToString(b)
 }
 
@@ -36,7 +36,7 @@ func decodeCursor(s string) (createdAt time.Time, id uuid.UUID, err error) {
 	if err != nil {
 		return time.Time{}, uuid.Nil, errInvalidCursor
 	}
-	var c cursor
+	var c cursorPayload
 	if err := json.Unmarshal(b, &c); err != nil || c.ID == uuid.Nil || c.Micros < 0 || c.Micros > maxCursorMicros {
 		return time.Time{}, uuid.Nil, errInvalidCursor
 	}
