@@ -1,0 +1,8 @@
+# Local environment (copy from .env.example)
+.env
+
+# Build output
+/bin/
+
+# Assignment brief (not part of the deliverable)
+/LakiPay_*.pdf
