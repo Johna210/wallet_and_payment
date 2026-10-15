@@ -16,3 +16,14 @@ WHERE (sqlc.narg('user_id')::uuid IS NULL OR user_id = sqlc.narg('user_id'))
        OR (created_at, id) < (sqlc.narg('after_created_at')::timestamptz, sqlc.narg('after_id')::uuid))
 ORDER BY created_at DESC, id DESC
 LIMIT sqlc.arg('row_limit');
+
+-- name: GetWalletForUpdate :one
+SELECT * FROM wallets
+WHERE id = $1
+FOR UPDATE;
+
+-- name: UpdateWalletStatus :one
+UPDATE wallets
+SET status = $2, updated_at = now()
+WHERE id = $1
+RETURNING *;

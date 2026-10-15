@@ -450,3 +450,163 @@ func TestListWalletsAcceptsLimitBounds(t *testing.T) {
 		t.Errorf("limit=100: %d wallets, next_cursor %v", len(list.Data), list.NextCursor)
 	}
 }
+
+// setStatus asks the API to change a Wallet's status and returns the response.
+func setStatus(t *testing.T, srv *httptest.Server, id, status string) *http.Response {
+	t.Helper()
+	return patchJSON(t, srv, "/v1/wallets/"+id+"/status", `{"status":"`+status+`"}`)
+}
+
+// mustSetStatus changes a Wallet's status, failing the test unless it succeeds.
+func mustSetStatus(t *testing.T, srv *httptest.Server, id, status string) walletBody {
+	t.Helper()
+	resp := setStatus(t, srv, id, status)
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("set status %s = %d, want 200 (body %s)", status, resp.StatusCode, readBody(t, resp))
+	}
+	var w walletBody
+	decode(t, resp, &w)
+	return w
+}
+
+func TestChangeWalletStatusAllowedTransitions(t *testing.T) {
+	cases := []struct {
+		name  string
+		steps []string // statuses applied in order; the last is asserted
+	}{
+		{"freeze", []string{"FROZEN"}},
+		{"reactivate", []string{"FROZEN", "ACTIVE"}},
+		{"close active", []string{"CLOSED"}},
+		{"close frozen", []string{"FROZEN", "CLOSED"}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			srv := newServer(t)
+			created := createWallet(t, srv, uuid.NewString(), "ETB")
+
+			var changed walletBody
+			for _, status := range tc.steps {
+				changed = mustSetStatus(t, srv, created.ID, status)
+			}
+
+			want := tc.steps[len(tc.steps)-1]
+			if changed.Status != want {
+				t.Errorf("response status = %s, want %s", changed.Status, want)
+			}
+			resp := get(t, srv, "/v1/wallets/"+created.ID)
+			var got walletBody
+			decode(t, resp, &got)
+			if got != changed {
+				t.Errorf("GET = %+v, want %+v", got, changed)
+			}
+			if got.ID != created.ID || got.UserID != created.UserID || got.Balance != created.Balance || got.CreatedAt != created.CreatedAt {
+				t.Errorf("status change altered more than status: %+v -> %+v", created, got)
+			}
+			if got.UpdatedAt == created.UpdatedAt {
+				t.Errorf("updated_at did not change from %s", created.UpdatedAt)
+			}
+		})
+	}
+}
+
+func TestChangeWalletStatusFromClosedIsRejected(t *testing.T) {
+	srv := newServer(t)
+	created := createWallet(t, srv, uuid.NewString(), "ETB")
+	closed := mustSetStatus(t, srv, created.ID, "CLOSED")
+
+	for _, status := range []string{"ACTIVE", "FROZEN"} {
+		t.Run(status, func(t *testing.T) {
+			resp := setStatus(t, srv, created.ID, status)
+			if resp.StatusCode != http.StatusUnprocessableEntity {
+				t.Fatalf("status = %d, want 422", resp.StatusCode)
+			}
+			if p := decodeProblem(t, resp); p.Code != "invalid_status_transition" {
+				t.Errorf("code = %q, want invalid_status_transition", p.Code)
+			}
+
+			var got walletBody
+			decode(t, get(t, srv, "/v1/wallets/"+created.ID), &got)
+			if got != closed {
+				t.Errorf("rejected change altered the wallet: %+v, want %+v", got, closed)
+			}
+		})
+	}
+}
+
+func TestChangeWalletStatusToCurrentStatusIsANoOp(t *testing.T) {
+	for _, status := range []string{"ACTIVE", "FROZEN", "CLOSED"} {
+		t.Run(status, func(t *testing.T) {
+			srv := newServer(t)
+			created := createWallet(t, srv, uuid.NewString(), "ETB")
+			before := created
+			if status != "ACTIVE" {
+				before = mustSetStatus(t, srv, created.ID, status)
+			}
+
+			after := mustSetStatus(t, srv, created.ID, status)
+
+			if after != before {
+				t.Errorf("no-op changed the wallet: %+v, want %+v", after, before)
+			}
+			var got walletBody
+			decode(t, get(t, srv, "/v1/wallets/"+created.ID), &got)
+			if got != before {
+				t.Errorf("GET = %+v, want %+v", got, before)
+			}
+		})
+	}
+}
+
+func TestChangeWalletStatusNotFound(t *testing.T) {
+	srv := newServer(t)
+
+	resp := setStatus(t, srv, uuid.NewString(), "FROZEN")
+	if resp.StatusCode != http.StatusNotFound {
+		t.Fatalf("status = %d, want 404", resp.StatusCode)
+	}
+	if p := decodeProblem(t, resp); p.Code != "wallet_not_found" {
+		t.Errorf("code = %q, want wallet_not_found", p.Code)
+	}
+}
+
+func TestChangeWalletStatusRejectsInvalidInput(t *testing.T) {
+	srv := newServer(t)
+	created := createWallet(t, srv, uuid.NewString(), "ETB")
+	cases := []struct {
+		name       string
+		id         string
+		body       string
+		wantCode   string
+		wantFields []string
+	}{
+		{"unknown status", created.ID, `{"status":"SUSPENDED"}`, "validation_failed", []string{"status"}},
+		{"lower-case status", created.ID, `{"status":"frozen"}`, "validation_failed", []string{"status"}},
+		{"missing status", created.ID, `{}`, "validation_failed", []string{"status"}},
+		{"wrong type", created.ID, `{"status":1}`, "validation_failed", []string{"status"}},
+		{"unknown field", created.ID, `{"status":"FROZEN","balance":"5.00"}`, "validation_failed", []string{"balance"}},
+		{"malformed id", "not-a-uuid", `{"status":"FROZEN"}`, "validation_failed", []string{"id"}},
+		{"empty body", created.ID, ``, "invalid_json", nil},
+		{"not json", created.ID, `FROZEN`, "invalid_json", nil},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			resp := patchJSON(t, srv, "/v1/wallets/"+tc.id+"/status", tc.body)
+			if resp.StatusCode != http.StatusBadRequest {
+				t.Fatalf("status = %d, want 400", resp.StatusCode)
+			}
+			p := decodeProblem(t, resp)
+			if p.Code != tc.wantCode {
+				t.Errorf("code = %q, want %s", p.Code, tc.wantCode)
+			}
+			if got := p.fieldNames(); !slices.Equal(got, tc.wantFields) {
+				t.Errorf("fields = %v, want %v", got, tc.wantFields)
+			}
+		})
+	}
+
+	var got walletBody
+	decode(t, get(t, srv, "/v1/wallets/"+created.ID), &got)
+	if got != created {
+		t.Errorf("rejected requests altered the wallet: %+v, want %+v", got, created)
+	}
+}

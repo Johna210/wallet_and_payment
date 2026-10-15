@@ -18,6 +18,7 @@ type WalletService interface {
 	Create(ctx context.Context, userID uuid.UUID, currency domain.Currency) (domain.Wallet, error)
 	Get(ctx context.Context, id uuid.UUID) (domain.Wallet, error)
 	List(ctx context.Context, filter domain.WalletFilter, after *domain.WalletPosition, limit int) (domain.WalletPage, error)
+	ChangeStatus(ctx context.Context, id uuid.UUID, status domain.WalletStatus) (domain.Wallet, error)
 }
 
 type walletResponse struct {
@@ -92,6 +93,41 @@ func handleGetWallet(svc WalletService, ew errorWriter) http.HandlerFunc {
 			return
 		}
 		wallet, err := svc.Get(r.Context(), id)
+		if err != nil {
+			ew.write(w, r, err)
+			return
+		}
+		writeJSON(w, http.StatusOK, newWalletResponse(wallet))
+	}
+}
+
+type changeWalletStatusRequest struct {
+	Status string `json:"status"`
+}
+
+func handleChangeWalletStatus(svc WalletService, ew errorWriter) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		id, ok := parseUUID(r.PathValue("id"))
+		if !ok {
+			ew.write(w, r, domain.ValidationError(domain.FieldError{Field: "id", Message: "must be a UUID"}))
+			return
+		}
+		var req changeWalletStatusRequest
+		if err := decodeJSON(r, &req); err != nil {
+			ew.write(w, r, err)
+			return
+		}
+		status, err := domain.ParseWalletStatus(req.Status)
+		switch {
+		case req.Status == "":
+			ew.write(w, r, domain.ValidationError(domain.FieldError{Field: "status", Message: "is required"}))
+			return
+		case err != nil:
+			ew.write(w, r, domain.ValidationError(domain.FieldError{Field: "status", Message: err.Error()}))
+			return
+		}
+
+		wallet, err := svc.ChangeStatus(r.Context(), id, status)
 		if err != nil {
 			ew.write(w, r, err)
 			return

@@ -151,6 +151,22 @@ func postJSON(t *testing.T, srv *httptest.Server, path, body string) *http.Respo
 	return resp
 }
 
+// patchJSON issues a PATCH with a JSON body; the body is closed when the test ends.
+func patchJSON(t *testing.T, srv *httptest.Server, path, body string) *http.Response {
+	t.Helper()
+	req, err := http.NewRequest(http.MethodPatch, srv.URL+path, strings.NewReader(body))
+	if err != nil {
+		t.Fatalf("build PATCH %s: %v", path, err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := srv.Client().Do(req)
+	if err != nil {
+		t.Fatalf("PATCH %s: %v", path, err)
+	}
+	t.Cleanup(func() { _ = resp.Body.Close() })
+	return resp
+}
+
 func readBody(t *testing.T, resp *http.Response) string {
 	t.Helper()
 	b, err := io.ReadAll(resp.Body)
