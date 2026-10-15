@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"log/slog"
 	"strings"
+	"time"
 
 	"github.com/google/uuid"
 
@@ -54,18 +55,38 @@ type WalletReader interface {
 	Get(ctx context.Context, id uuid.UUID) (domain.Wallet, error)
 }
 
+// Outcomes reported to an OperationObserver.
+const (
+	OutcomeSuccess  = "success"  // completed, or replayed from an earlier request
+	OutcomeRejected = "rejected" // a business rule refused it; the reason is the Rejection code
+	OutcomeError    = "error"    // an unexpected failure
+)
+
+// NoReason is the reason reported with an outcome that has no Rejection code.
+const NoReason = "none"
+
+// OperationObserver is told how every money-moving request ended.
+type OperationObserver interface {
+	// ObserveOperation reports one finished Deposit, Withdrawal or Transfer:
+	// its type, one of the Outcome constants, the Rejection code (NoReason
+	// unless rejected) and how long it took.
+	ObserveOperation(typ, outcome, reason string, d time.Duration)
+}
+
 // LedgerService moves money and reads the resulting Transactions.
 type LedgerService struct {
 	repo      LedgerRepository
 	wallets   WalletReader
 	logger    *slog.Logger
+	observer  OperationObserver
 	maxAmount int64 // minor units
 }
 
 // NewLedgerService returns a LedgerService that logs every financial operation
-// to logger and refuses any single operation above maxAmount minor units.
-func NewLedgerService(repo LedgerRepository, wallets WalletReader, logger *slog.Logger, maxAmount int64) *LedgerService {
-	return &LedgerService{repo: repo, wallets: wallets, logger: logger, maxAmount: maxAmount}
+// to logger, reports each one to observer, and refuses any single operation
+// above maxAmount minor units.
+func NewLedgerService(repo LedgerRepository, wallets WalletReader, logger *slog.Logger, maxAmount int64, observer OperationObserver) *LedgerService {
+	return &LedgerService{repo: repo, wallets: wallets, logger: logger, maxAmount: maxAmount, observer: observer}
 }
 
 // MoneyMovement is the outcome of a money-moving request.
@@ -106,8 +127,8 @@ func (s *LedgerService) Withdraw(ctx context.Context, walletID uuid.UUID, amount
 // Transfer moves amount (a decimal string in the Wallets' shared Currency)
 // from the source Wallet to the destination Wallet.
 func (s *LedgerService) Transfer(ctx context.Context, sourceID, destinationID uuid.UUID, amount, idempotencyKey string) (out MoneyMovement, err error) {
-	op := financialOp{typ: domain.TypeTransfer, walletIDs: []uuid.UUID{sourceID, destinationID}, amount: amount, key: idempotencyKey}
-	defer func() { s.logOutcome(ctx, op, out, err) }()
+	op := financialOp{typ: domain.TypeTransfer, walletIDs: []uuid.UUID{sourceID, destinationID}, amount: amount, key: idempotencyKey, start: time.Now()}
+	defer func() { s.finish(ctx, op, out, err) }()
 
 	// Wallets are inserted by Record with a CHECK that they differ, so a
 	// self-transfer must be refused before anything is stored.
@@ -197,8 +218,8 @@ func lockInOrder(ctx context.Context, tx LedgerTx, a, b uuid.UUID) (map[uuid.UUI
 }
 
 func (s *LedgerService) moveOneWallet(ctx context.Context, move walletMove, walletID uuid.UUID, amount, idempotencyKey string) (out MoneyMovement, err error) {
-	op := financialOp{typ: move.typ, walletIDs: []uuid.UUID{walletID}, amount: amount, key: idempotencyKey}
-	defer func() { s.logOutcome(ctx, op, out, err) }()
+	op := financialOp{typ: move.typ, walletIDs: []uuid.UUID{walletID}, amount: amount, key: idempotencyKey, start: time.Now()}
+	defer func() { s.finish(ctx, op, out, err) }()
 
 	// A Wallet's Currency never changes, so reading it without a lock is safe.
 	wallet, err := s.wallets.Get(ctx, walletID)
@@ -322,6 +343,21 @@ type financialOp struct {
 	amount    string // as requested, before parsing
 	currency  domain.Currency
 	key       string
+	start     time.Time
+}
+
+// finish records how a money-moving request ended, in the log and the metrics.
+func (s *LedgerService) finish(ctx context.Context, op financialOp, m MoneyMovement, err error) {
+	s.logOutcome(ctx, op, m, err)
+
+	outcome, reason := OutcomeSuccess, NoReason
+	if err != nil {
+		outcome = OutcomeError
+		if de, ok := domain.AsError(err); ok {
+			outcome, reason = OutcomeRejected, string(de.Code)
+		}
+	}
+	s.observer.ObserveOperation(strings.ToLower(string(op.typ)), outcome, reason, time.Since(op.start))
 }
 
 // logOutcome writes the one "financial operation" line every money-moving
