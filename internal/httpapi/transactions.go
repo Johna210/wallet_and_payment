@@ -2,7 +2,9 @@ package httpapi
 
 import (
 	"context"
+	"fmt"
 	"net/http"
+	"net/url"
 	"time"
 
 	"github.com/google/uuid"
@@ -24,6 +26,8 @@ type LedgerService interface {
 	Transfer(ctx context.Context, sourceID, destinationID uuid.UUID, amount, idempotencyKey string) (service.MoneyMovement, error)
 	GetTransaction(ctx context.Context, id uuid.UUID) (domain.TransactionDetail, error)
 	GetTransactionOfType(ctx context.Context, id uuid.UUID, t domain.TransactionType) (domain.TransactionDetail, error)
+	ListTransactions(ctx context.Context, filter domain.TransactionFilter, after *domain.TransactionPosition, limit int) (domain.TransactionPage, error)
+	ListWalletTransactions(ctx context.Context, walletID uuid.UUID, filter domain.TransactionFilter, after *domain.TransactionPosition, limit int) (domain.TransactionPage, error)
 }
 
 type ledgerEntryResponse struct {
@@ -34,7 +38,9 @@ type ledgerEntryResponse struct {
 	CreatedAt    time.Time `json:"created_at"`
 }
 
-type transactionResponse struct {
+// transactionSummaryResponse is a Transaction as listings show it, without its
+// Ledger Entries.
+type transactionSummaryResponse struct {
 	ID                  uuid.UUID                `json:"id"`
 	Type                domain.TransactionType   `json:"type"`
 	Status              domain.TransactionStatus `json:"status"`
@@ -44,7 +50,26 @@ type transactionResponse struct {
 	DestinationWalletID *uuid.UUID               `json:"destination_wallet_id"`
 	IdempotencyKey      string                   `json:"idempotency_key"`
 	CreatedAt           time.Time                `json:"created_at"`
-	LedgerEntries       []ledgerEntryResponse    `json:"ledger_entries"`
+}
+
+func newTransactionSummaryResponse(t domain.Transaction) transactionSummaryResponse {
+	return transactionSummaryResponse{
+		ID:                  t.ID,
+		Type:                t.Type,
+		Status:              t.Status,
+		Amount:              t.Amount.String(),
+		Currency:            t.Amount.Currency,
+		SourceWalletID:      t.SourceWalletID,
+		DestinationWalletID: t.DestinationWalletID,
+		IdempotencyKey:      t.IdempotencyKey,
+		CreatedAt:           t.CreatedAt.UTC(),
+	}
+}
+
+// transactionResponse is a Transaction with its Ledger Entries.
+type transactionResponse struct {
+	transactionSummaryResponse
+	LedgerEntries []ledgerEntryResponse `json:"ledger_entries"`
 }
 
 func newTransactionResponse(d domain.TransactionDetail) transactionResponse {
@@ -59,16 +84,8 @@ func newTransactionResponse(d domain.TransactionDetail) transactionResponse {
 		}
 	}
 	return transactionResponse{
-		ID:                  d.ID,
-		Type:                d.Type,
-		Status:              d.Status,
-		Amount:              d.Amount.String(),
-		Currency:            d.Amount.Currency,
-		SourceWalletID:      d.SourceWalletID,
-		DestinationWalletID: d.DestinationWalletID,
-		IdempotencyKey:      d.IdempotencyKey,
-		CreatedAt:           d.CreatedAt.UTC(),
-		LedgerEntries:       entries,
+		transactionSummaryResponse: newTransactionSummaryResponse(d.Transaction),
+		LedgerEntries:              entries,
 	}
 }
 
@@ -245,4 +262,130 @@ func transactionGetter(ew errorWriter, load func(context.Context, uuid.UUID) (do
 		}
 		writeJSON(w, http.StatusOK, newTransactionResponse(d))
 	}
+}
+
+type transactionListResponse struct {
+	Data       []transactionSummaryResponse `json:"data"`
+	NextCursor *string                      `json:"next_cursor"`
+}
+
+func handleListTransactions(svc LedgerService, ew errorWriter) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		q, err := parseTransactionListQuery(r.URL.Query())
+		if err != nil {
+			ew.write(w, r, err)
+			return
+		}
+		page, err := svc.ListTransactions(r.Context(), q.filter, q.after, q.limit)
+		if err != nil {
+			ew.write(w, r, err)
+			return
+		}
+		writeJSON(w, http.StatusOK, newTransactionListResponse(page))
+	}
+}
+
+// transactionListQuery is a parsed Transaction listing query string.
+type transactionListQuery struct {
+	filter domain.TransactionFilter
+	after  *domain.TransactionPosition
+	limit  int
+}
+
+// parseTransactionListQuery reads type, from, to, currency, limit, and cursor,
+// reporting every invalid parameter at once. from and to are inclusive RFC 3339
+// instants.
+func parseTransactionListQuery(q url.Values) (transactionListQuery, error) {
+	var (
+		out    = transactionListQuery{limit: defaultPageSize}
+		fields []domain.FieldError
+	)
+	invalid := func(field, message string) {
+		fields = append(fields, domain.FieldError{Field: field, Message: message})
+	}
+
+	if q.Has("type") {
+		if t, err := domain.ParseTransactionType(q.Get("type")); err == nil {
+			out.filter.Type = &t
+		} else {
+			invalid("type", err.Error())
+		}
+	}
+	for _, p := range []struct {
+		name string
+		dst  **time.Time
+	}{{"from", &out.filter.From}, {"to", &out.filter.To}} {
+		if !q.Has(p.name) {
+			continue
+		}
+		if t, err := time.Parse(time.RFC3339, q.Get(p.name)); err == nil {
+			*p.dst = &t
+		} else {
+			invalid(p.name, "must be an RFC 3339 timestamp, such as 2026-10-15T09:30:00Z")
+		}
+	}
+	if q.Has("currency") {
+		if c, err := domain.ParseCurrency(q.Get("currency")); err == nil {
+			out.filter.Currency = &c
+		} else {
+			invalid("currency", err.Error())
+		}
+	}
+	if from, to := out.filter.From, out.filter.To; from != nil && to != nil && from.After(*to) {
+		invalid("from", "must not be after to")
+	}
+	if q.Has("limit") {
+		if n, ok := parsePageSize(q.Get("limit")); ok {
+			out.limit = n
+		} else {
+			invalid("limit", fmt.Sprintf("must be a whole number from 1 to %d", maxPageSize))
+		}
+	}
+	if q.Has("cursor") {
+		if pos, err := decodeTransactionCursor(q.Get("cursor")); err == nil {
+			out.after = &pos
+		} else {
+			invalid("cursor", err.Error())
+		}
+	}
+
+	if len(fields) > 0 {
+		return transactionListQuery{}, domain.ValidationError(fields...)
+	}
+	return out, nil
+}
+
+// handleListWalletTransactions serves a Wallet's statement: the Transactions it
+// took part in, as source or destination.
+func handleListWalletTransactions(svc LedgerService, ew errorWriter) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		id, ok := parseUUID(r.PathValue("id"))
+		if !ok {
+			ew.write(w, r, domain.ValidationError(domain.FieldError{Field: "id", Message: "must be a UUID"}))
+			return
+		}
+		q, err := parseTransactionListQuery(r.URL.Query())
+		if err != nil {
+			ew.write(w, r, err)
+			return
+		}
+		page, err := svc.ListWalletTransactions(r.Context(), id, q.filter, q.after, q.limit)
+		if err != nil {
+			ew.write(w, r, err)
+			return
+		}
+		writeJSON(w, http.StatusOK, newTransactionListResponse(page))
+	}
+}
+
+func newTransactionListResponse(page domain.TransactionPage) transactionListResponse {
+	resp := transactionListResponse{Data: make([]transactionSummaryResponse, len(page.Transactions))}
+	for i, t := range page.Transactions {
+		resp.Data[i] = newTransactionSummaryResponse(t)
+	}
+	if page.Next != nil {
+		cursor := encodeTransactionCursor(*page.Next)
+		resp.NextCursor = &cursor
+	}
+	return resp
 }

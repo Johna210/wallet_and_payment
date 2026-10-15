@@ -16,6 +16,19 @@ const (
 	TypeTransfer   TransactionType = "TRANSFER"
 )
 
+// ErrInvalidTransactionType is returned for any string that is not a
+// Transaction type.
+var ErrInvalidTransactionType = errors.New("must be one of DEPOSIT, WITHDRAWAL, TRANSFER")
+
+// ParseTransactionType accepts an exact, upper-case Transaction type.
+func ParseTransactionType(s string) (TransactionType, error) {
+	switch t := TransactionType(s); t {
+	case TypeDeposit, TypeWithdrawal, TypeTransfer:
+		return t, nil
+	}
+	return "", ErrInvalidTransactionType
+}
+
 // TransactionStatus is the state of a Transaction. Only completed operations
 // are stored, so COMPLETED is the only value for now.
 type TransactionStatus string
@@ -50,6 +63,30 @@ type LedgerEntry struct {
 	Amount        Money
 	BalanceAfter  Money
 	CreatedAt     time.Time
+}
+
+// TransactionFilter narrows a Transaction listing. A nil field matches every
+// value. From and To bound the creation time and are both inclusive.
+type TransactionFilter struct {
+	Type     *TransactionType
+	Currency *Currency
+	From     *time.Time
+	To       *time.Time
+}
+
+// TransactionPosition marks where a Transaction listing page ended. Listings
+// are ordered newest first on (CreatedAt, ID), so the next page holds
+// Transactions strictly older than this position.
+type TransactionPosition struct {
+	CreatedAt time.Time
+	ID        uuid.UUID
+}
+
+// TransactionPage is one page of a Transaction listing. Next is nil on the
+// last page.
+type TransactionPage struct {
+	Transactions []Transaction
+	Next         *TransactionPosition
 }
 
 // TransactionDetail is a Transaction together with its Ledger Entries.

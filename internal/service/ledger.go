@@ -39,6 +39,14 @@ type LedgerRepository interface {
 	InTx(ctx context.Context, fn func(LedgerTx) error) error
 	// Get returns a Transaction with its Ledger Entries, or transaction_not_found.
 	Get(ctx context.Context, id uuid.UUID) (domain.TransactionDetail, error)
+	// List returns up to limit Transactions across all Wallets matching
+	// filter, newest first, starting strictly after the position when it is
+	// non-nil.
+	List(ctx context.Context, filter domain.TransactionFilter, after *domain.TransactionPosition, limit int) ([]domain.Transaction, error)
+	// ListForWallet returns up to limit of the Wallet's Transactions matching
+	// filter, as source or destination, newest first, starting strictly after
+	// the position when it is non-nil.
+	ListForWallet(ctx context.Context, walletID uuid.UUID, filter domain.TransactionFilter, after *domain.TransactionPosition, limit int) ([]domain.Transaction, error)
 }
 
 // WalletReader reads Wallets outside any transaction.
@@ -378,6 +386,52 @@ func (s *LedgerService) GetTransactionOfType(ctx context.Context, id uuid.UUID, 
 			domain.NewError(domain.CodeTransactionNotFound, "no transaction of this type exists with this id"))
 	}
 	return d, nil
+}
+
+// ListTransactions returns up to limit Transactions across all Wallets
+// matching filter, newest first, starting strictly after the position when it
+// is non-nil. limit must be positive.
+func (s *LedgerService) ListTransactions(ctx context.Context, filter domain.TransactionFilter, after *domain.TransactionPosition, limit int) (domain.TransactionPage, error) {
+	if limit < 1 {
+		return domain.TransactionPage{}, fmt.Errorf("list transactions: limit must be positive, got %d", limit)
+	}
+	// Ask for one extra row: its presence is how we know another page exists.
+	txs, err := s.repo.List(ctx, filter, after, limit+1)
+	if err != nil {
+		return domain.TransactionPage{}, fmt.Errorf("list transactions: %w", err)
+	}
+	return transactionPage(txs, limit), nil
+}
+
+// ListWalletTransactions returns up to limit of the Wallet's Transactions
+// matching filter, as source or destination, newest first, starting strictly
+// after the position when it is non-nil. limit must be positive.
+func (s *LedgerService) ListWalletTransactions(ctx context.Context, walletID uuid.UUID, filter domain.TransactionFilter, after *domain.TransactionPosition, limit int) (domain.TransactionPage, error) {
+	if limit < 1 {
+		return domain.TransactionPage{}, fmt.Errorf("list wallet transactions: limit must be positive, got %d", limit)
+	}
+	// Wallets are never deleted, so one that exists now still exists when the
+	// listing runs. Without this check an unknown id would read as an empty
+	// statement.
+	if _, err := s.wallets.Get(ctx, walletID); err != nil {
+		return domain.TransactionPage{}, fmt.Errorf("list wallet transactions: %w", err)
+	}
+	txs, err := s.repo.ListForWallet(ctx, walletID, filter, after, limit+1)
+	if err != nil {
+		return domain.TransactionPage{}, fmt.Errorf("list wallet transactions: %w", err)
+	}
+	return transactionPage(txs, limit), nil
+}
+
+// transactionPage trims txs, fetched with one row beyond limit, to a page and
+// points Next at its last row when that extra row shows more follow.
+func transactionPage(txs []domain.Transaction, limit int) domain.TransactionPage {
+	if len(txs) <= limit {
+		return domain.TransactionPage{Transactions: txs}
+	}
+	txs = txs[:limit]
+	last := txs[limit-1]
+	return domain.TransactionPage{Transactions: txs, Next: &domain.TransactionPosition{CreatedAt: last.CreatedAt, ID: last.ID}}
 }
 
 // parseAmount parses a request amount in currency c and checks it against the

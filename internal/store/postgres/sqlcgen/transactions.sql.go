@@ -165,6 +165,159 @@ func (q *Queries) ListLedgerEntriesForTransaction(ctx context.Context, transacti
 	return items, nil
 }
 
+const listTransactions = `-- name: ListTransactions :many
+
+SELECT id, type, status, amount, currency, source_wallet_id, destination_wallet_id, idempotency_key, request_hash, created_at FROM transactions
+WHERE ($1::text IS NULL OR type = $1)
+  AND ($2::char(3) IS NULL OR currency = $2::char(3))
+  AND created_at >= COALESCE($3::timestamptz, '-infinity')
+  AND created_at <= COALESCE($4::timestamptz, 'infinity')
+  AND (created_at, id) < (COALESCE($5::timestamptz, 'infinity'),
+                          COALESCE($6::uuid, 'ffffffff-ffff-ffff-ffff-ffffffffffff'))
+ORDER BY created_at DESC, id DESC
+LIMIT $7
+`
+
+type ListTransactionsParams struct {
+	Type           *string
+	Currency       *string
+	CreatedFrom    pgtype.Timestamptz
+	CreatedTo      pgtype.Timestamptz
+	AfterCreatedAt pgtype.Timestamptz
+	AfterID        pgtype.UUID
+	RowLimit       int32
+}
+
+// Listing filters. Every condition on created_at and the keyset cursor is written
+// as a bound that is always present, with COALESCE standing in for an absent
+// parameter. Unlike "$n IS NULL OR created_at >= $n", such a bound is a valid
+// index condition even in a generic plan (one planned without knowing the
+// values, which a cached prepared statement may switch to), so the cursor
+// seeks into the index instead of reading from the newest row and filtering.
+// currency is char(3): it is compared as char(3) so the planner can use the
+// column's statistics, which a cast to text would hide.
+func (q *Queries) ListTransactions(ctx context.Context, arg ListTransactionsParams) ([]Transaction, error) {
+	rows, err := q.db.Query(ctx, listTransactions,
+		arg.Type,
+		arg.Currency,
+		arg.CreatedFrom,
+		arg.CreatedTo,
+		arg.AfterCreatedAt,
+		arg.AfterID,
+		arg.RowLimit,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []Transaction
+	for rows.Next() {
+		var i Transaction
+		if err := rows.Scan(
+			&i.ID,
+			&i.Type,
+			&i.Status,
+			&i.Amount,
+			&i.Currency,
+			&i.SourceWalletID,
+			&i.DestinationWalletID,
+			&i.IdempotencyKey,
+			&i.RequestHash,
+			&i.CreatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listWalletTransactions = `-- name: ListWalletTransactions :many
+SELECT id, type, status, amount, currency, source_wallet_id, destination_wallet_id, idempotency_key, request_hash, created_at FROM (
+    (SELECT s.id, s.type, s.status, s.amount, s.currency, s.source_wallet_id, s.destination_wallet_id, s.idempotency_key, s.request_hash, s.created_at FROM transactions s
+     WHERE s.source_wallet_id = $1
+       AND ($2::text IS NULL OR s.type = $2)
+       AND ($3::char(3) IS NULL OR s.currency = $3::char(3))
+       AND s.created_at >= COALESCE($4::timestamptz, '-infinity')
+       AND s.created_at <= COALESCE($5::timestamptz, 'infinity')
+       AND (s.created_at, s.id) < (COALESCE($6::timestamptz, 'infinity'),
+                                   COALESCE($7::uuid, 'ffffffff-ffff-ffff-ffff-ffffffffffff'))
+     ORDER BY s.created_at DESC, s.id DESC
+     LIMIT $8)
+    UNION ALL
+    (SELECT d.id, d.type, d.status, d.amount, d.currency, d.source_wallet_id, d.destination_wallet_id, d.idempotency_key, d.request_hash, d.created_at FROM transactions d
+     WHERE d.destination_wallet_id = $1
+       AND ($2::text IS NULL OR d.type = $2)
+       AND ($3::char(3) IS NULL OR d.currency = $3::char(3))
+       AND d.created_at >= COALESCE($4::timestamptz, '-infinity')
+       AND d.created_at <= COALESCE($5::timestamptz, 'infinity')
+       AND (d.created_at, d.id) < (COALESCE($6::timestamptz, 'infinity'),
+                                   COALESCE($7::uuid, 'ffffffff-ffff-ffff-ffff-ffffffffffff'))
+     ORDER BY d.created_at DESC, d.id DESC
+     LIMIT $8)
+) AS statement
+ORDER BY created_at DESC, id DESC
+LIMIT $8
+`
+
+type ListWalletTransactionsParams struct {
+	WalletID       pgtype.UUID
+	Type           *string
+	Currency       *string
+	CreatedFrom    pgtype.Timestamptz
+	CreatedTo      pgtype.Timestamptz
+	AfterCreatedAt pgtype.Timestamptz
+	AfterID        pgtype.UUID
+	RowLimit       int32
+}
+
+// A Wallet's statement is its Transactions as source plus as destination. Each
+// side is read newest-first straight off its (wallet, created_at, id) index and
+// cut at the page size, so the work follows the page, not the Wallet's history.
+// The two sides never overlap: a Transfer's Wallets are distinct (CHECK).
+func (q *Queries) ListWalletTransactions(ctx context.Context, arg ListWalletTransactionsParams) ([]Transaction, error) {
+	rows, err := q.db.Query(ctx, listWalletTransactions,
+		arg.WalletID,
+		arg.Type,
+		arg.Currency,
+		arg.CreatedFrom,
+		arg.CreatedTo,
+		arg.AfterCreatedAt,
+		arg.AfterID,
+		arg.RowLimit,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []Transaction
+	for rows.Next() {
+		var i Transaction
+		if err := rows.Scan(
+			&i.ID,
+			&i.Type,
+			&i.Status,
+			&i.Amount,
+			&i.Currency,
+			&i.SourceWalletID,
+			&i.DestinationWalletID,
+			&i.IdempotencyKey,
+			&i.RequestHash,
+			&i.CreatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const setWalletBalance = `-- name: SetWalletBalance :one
 UPDATE wallets
 SET balance = $2, updated_at = now()
