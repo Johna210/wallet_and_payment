@@ -15,7 +15,6 @@ import (
 	"github.com/google/uuid"
 )
 
-// transfer posts a Transfer of amount from one Wallet to another under key.
 func transfer(t *testing.T, srv *httptest.Server, from, to, key, amount string) *http.Response {
 	t.Helper()
 	return postWithKey(t, srv, "/v1/transfers", key,
@@ -385,10 +384,9 @@ func TestConcurrentTransfersWithSameKeyCreateOneTransaction(t *testing.T) {
 	assertBalancesMatchLedger(t)
 }
 
-// TestConcurrentTransfersAndWithdrawalsConserveMoney hammers a few Wallets
-// with opposite-direction Transfers and Withdrawals at once. Whatever
-// interleaving the database picks, no Balance goes negative, nothing deadlocks
-// or fails with a 5xx, and every unit of money is accounted for.
+// TestConcurrentTransfersAndWithdrawalsConserveMoney hammers a few Wallets with
+// opposite-direction Transfers and Withdrawals at once: no Balance goes negative,
+// nothing deadlocks or returns a 5xx, and every unit of money is accounted for.
 func TestConcurrentTransfersAndWithdrawalsConserveMoney(t *testing.T) {
 	srv := newServer(t)
 	const (

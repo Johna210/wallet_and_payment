@@ -12,7 +12,6 @@ import (
 	"time"
 )
 
-// Config is the complete runtime configuration of the service.
 type Config struct {
 	HTTPAddr         string
 	DatabaseURL      string
@@ -30,13 +29,12 @@ type Config struct {
 	ShutdownTimeout    time.Duration
 }
 
-// Load reads the configuration from the process environment.
 func Load() (Config, error) {
 	return LoadFrom(os.LookupEnv)
 }
 
-// LoadFrom reads the configuration through lookup, which has the signature of
-// os.LookupEnv. All problems are reported together rather than one at a time.
+// LoadFrom reads the configuration through lookup (the signature of os.LookupEnv)
+// and reports all problems together.
 func LoadFrom(lookup func(string) (string, bool)) (Config, error) {
 	p := parser{lookup: lookup}
 	cfg := Config{

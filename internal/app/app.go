@@ -1,7 +1,6 @@
-// Package app is the composition root: it wires configuration, the store,
-// services, and the HTTP transport into one handler. The binary and the
-// integration tests both build the service through it, so tests exercise
-// exactly what runs in production.
+// Package app is the composition root: it wires configuration, the store, services
+// and the HTTP transport into one handler, built the same way by the binary and
+// the integration tests.
 package app
 
 import (
@@ -17,7 +16,6 @@ import (
 	"github.com/Johna210/wallet_and_payment/internal/store/postgres"
 )
 
-// NewHandler builds the complete HTTP handler over pool.
 func NewHandler(cfg config.Config, logger *slog.Logger, pool *pgxpool.Pool, readiness *httpapi.Readiness) http.Handler {
 	wallets := postgres.NewWalletStore(pool)
 	m := metrics.New(pool)

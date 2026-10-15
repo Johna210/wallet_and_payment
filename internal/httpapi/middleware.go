@@ -22,7 +22,6 @@ const (
 	routeKey
 )
 
-// RequestIDFrom returns the request id stored by the requestID middleware.
 func RequestIDFrom(ctx context.Context) string {
 	id, _ := ctx.Value(requestIDKey).(string)
 	return id
@@ -67,7 +66,6 @@ func validRequestID(id string) bool {
 	return true
 }
 
-// statusRecorder captures the status code and body size for the access log.
 type statusRecorder struct {
 	http.ResponseWriter
 	status int
@@ -92,8 +90,7 @@ func (sr *statusRecorder) Write(b []byte) (int, error) {
 
 func (sr *statusRecorder) Unwrap() http.ResponseWriter { return sr.ResponseWriter }
 
-// accessLog writes one structured line per request. The route is the matched
-// pattern, never the raw path, so it can be aggregated.
+// accessLog writes one structured line per request, labelled with the route pattern, not the raw path.
 func accessLog(logger *slog.Logger) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -157,8 +154,7 @@ func instrument(obs RequestObserver) func(http.Handler) http.Handler {
 	}
 }
 
-// recoverPanic turns a handler panic into a logged stack trace and a 500
-// problem response, so one bad request cannot take the process down.
+// recoverPanic turns a handler panic into a logged stack trace and a 500 problem.
 func recoverPanic(logger *slog.Logger) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -182,8 +178,7 @@ func recoverPanic(logger *slog.Logger) func(http.Handler) http.Handler {
 	}
 }
 
-// timeout bounds every request's context; DB calls made with it are
-// cancelled when the deadline passes.
+// timeout bounds every request's context, which cancels its DB calls.
 func timeout(d time.Duration) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -194,7 +189,6 @@ func timeout(d time.Duration) func(http.Handler) http.Handler {
 	}
 }
 
-// limitBody caps how many bytes a handler can read from the request body.
 func limitBody(n int64) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

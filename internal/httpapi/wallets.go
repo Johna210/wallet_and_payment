@@ -13,7 +13,6 @@ import (
 	"github.com/Johna210/wallet_and_payment/internal/domain"
 )
 
-// WalletService is the Wallet use cases the transport calls.
 type WalletService interface {
 	Create(ctx context.Context, userID uuid.UUID, currency domain.Currency) (domain.Wallet, error)
 	Get(ctx context.Context, id uuid.UUID) (domain.Wallet, error)
@@ -173,15 +172,12 @@ const (
 	maxPageSize     = 100
 )
 
-// walletListQuery is a parsed GET /v1/wallets query string.
 type walletListQuery struct {
 	filter domain.WalletFilter
 	after  *domain.WalletPosition
 	limit  int
 }
 
-// parseWalletListQuery reads user_id, status, currency, limit, and cursor,
-// reporting every invalid parameter at once.
 func parseWalletListQuery(q url.Values) (walletListQuery, error) {
 	var (
 		out    = walletListQuery{limit: defaultPageSize}

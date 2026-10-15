@@ -20,7 +20,6 @@ type transactionListBody struct {
 	NextCursor *string           `json:"next_cursor"`
 }
 
-// mustWithdraw withdraws and fails the test unless the Withdrawal is newly created.
 func mustWithdraw(t *testing.T, srv *httptest.Server, walletID, amount string) transactionBody {
 	t.Helper()
 	resp := withdraw(t, srv, walletID, uuid.NewString(), amount)
@@ -32,7 +31,6 @@ func mustWithdraw(t *testing.T, srv *httptest.Server, walletID, amount string) t
 	return tx
 }
 
-// mustTransfer transfers and fails the test unless the Transfer is newly created.
 func mustTransfer(t *testing.T, srv *httptest.Server, from, to, amount string) transactionBody {
 	t.Helper()
 	resp := transfer(t, srv, from, to, uuid.NewString(), amount)
@@ -44,7 +42,6 @@ func mustTransfer(t *testing.T, srv *httptest.Server, from, to, amount string) t
 	return tx
 }
 
-// listTransactions GETs a Transaction listing (path plus query) and decodes it.
 func listTransactions(t *testing.T, srv *httptest.Server, path string) transactionListBody {
 	t.Helper()
 	resp := get(t, srv, path)
@@ -187,7 +184,6 @@ func TestWalletStatementWithMalformedWalletIDIsRejected(t *testing.T) {
 	}
 }
 
-// queryString builds a query string from key, value pairs, escaping the values.
 func queryString(kv ...string) string {
 	v := url.Values{}
 	for i := 0; i < len(kv); i += 2 {
@@ -229,7 +225,6 @@ func newHistory(t *testing.T, srv *httptest.Server) history {
 	return h
 }
 
-// ids returns the ids of the Transactions at the given indexes, in that order.
 func (h history) ids(indexes ...int) []string {
 	ids := []string{}
 	for _, i := range indexes {
@@ -238,7 +233,6 @@ func (h history) ids(indexes ...int) []string {
 	return ids
 }
 
-// at returns the created_at of Transaction i, as the API reports it.
 func (h history) at(i int) string { return h.txs[i].CreatedAt }
 
 // inOffset renders an RFC 3339 instant with a +03:00 offset instead of Z.
@@ -251,7 +245,6 @@ func inOffset(t *testing.T, instant string) string {
 	return parsed.In(time.FixedZone("", 3*60*60)).Format(time.RFC3339Nano)
 }
 
-// shifted returns an RFC 3339 instant d away from the given one.
 func shifted(t *testing.T, instant string, d time.Duration) string {
 	t.Helper()
 	parsed, err := time.Parse(time.RFC3339Nano, instant)
@@ -267,7 +260,6 @@ type filterCase struct {
 	want  []int // indexes into history.txs, in the order expected
 }
 
-// runFilterCases lists path+query for each case and compares the ids.
 func runFilterCases(t *testing.T, srv *httptest.Server, h history, path string, cases []filterCase) {
 	t.Helper()
 	for _, tc := range cases {
@@ -385,9 +377,8 @@ func TestListTransactionsRejectsInvalidFilters(t *testing.T) {
 	}
 }
 
-// pageThroughTransactions follows next_cursor from the first page of
-// path+query until it runs out, returning each page's Transactions in order.
-// query is "" or a query string starting with "?".
+// pageThroughTransactions follows next_cursor from the first page of path+query
+// until it runs out. query is "" or a query string starting with "?".
 func pageThroughTransactions(t *testing.T, srv *httptest.Server, path, query string) [][]transactionBody {
 	t.Helper()
 	var pages [][]transactionBody

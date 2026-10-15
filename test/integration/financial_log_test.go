@@ -30,7 +30,6 @@ func (b *syncBuffer) Write(p []byte) (int, error) {
 	return b.buf.Write(p)
 }
 
-// financialLines returns the parsed "financial operation" log records.
 func (b *syncBuffer) financialLines(t *testing.T) []map[string]any {
 	t.Helper()
 	b.mu.Lock()

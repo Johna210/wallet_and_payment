@@ -19,29 +19,23 @@ import (
 
 const transactionsIdempotencyKeyKey = "transactions_idempotency_key_key"
 
-// LedgerStore persists Transactions and Ledger Entries, and runs money-moving
-// work inside one database transaction.
 type LedgerStore struct {
 	pool *pgxpool.Pool
 	q    *sqlcgen.Queries
 }
 
-// NewLedgerStore returns a LedgerStore over pool.
 func NewLedgerStore(pool *pgxpool.Pool) *LedgerStore {
 	return &LedgerStore{pool: pool, q: sqlcgen.New(pool)}
 }
 
-// InTx runs fn inside one READ COMMITTED database transaction. It commits when
-// fn returns nil and rolls back on any error, which is returned unchanged
-// (apart from errors raised by commit itself).
+// InTx runs fn inside one READ COMMITTED database transaction: commit if fn returns nil,
+// roll back otherwise.
 func (s *LedgerStore) InTx(ctx context.Context, fn func(service.LedgerTx) error) error {
 	return pgx.BeginTxFunc(ctx, s.pool, pgx.TxOptions{IsoLevel: pgx.ReadCommitted}, func(tx pgx.Tx) error {
 		return fn(&ledgerTx{q: s.q.WithTx(tx)})
 	})
 }
 
-// Get returns the Transaction with id and its Ledger Entries, or
-// transaction_not_found.
 func (s *LedgerStore) Get(ctx context.Context, id uuid.UUID) (domain.TransactionDetail, error) {
 	row, err := s.q.GetTransaction(ctx, id)
 	if errors.Is(err, pgx.ErrNoRows) {
@@ -53,8 +47,6 @@ func (s *LedgerStore) Get(ctx context.Context, id uuid.UUID) (domain.Transaction
 	return withEntries(ctx, s.q, row)
 }
 
-// List returns up to limit Transactions across all Wallets matching filter,
-// newest first, starting strictly after the position when it is non-nil.
 func (s *LedgerStore) List(ctx context.Context, filter domain.TransactionFilter, after *domain.TransactionPosition, limit int) ([]domain.Transaction, error) {
 	afterAt, afterID := afterParams(after)
 	rows, err := s.q.ListTransactions(ctx, sqlcgen.ListTransactionsParams{
@@ -72,9 +64,6 @@ func (s *LedgerStore) List(ctx context.Context, filter domain.TransactionFilter,
 	return transactionsFromRows(rows), nil
 }
 
-// ListForWallet returns up to limit of the Wallet's Transactions matching
-// filter, as source or destination, newest first, starting strictly after the
-// position when it is non-nil.
 func (s *LedgerStore) ListForWallet(ctx context.Context, walletID uuid.UUID, filter domain.TransactionFilter, after *domain.TransactionPosition, limit int) ([]domain.Transaction, error) {
 	afterAt, afterID := afterParams(after)
 	rows, err := s.q.ListWalletTransactions(ctx, sqlcgen.ListWalletTransactionsParams{
@@ -142,7 +131,6 @@ func transactionsFromRows(rows []sqlcgen.Transaction) []domain.Transaction {
 	return txs
 }
 
-// ledgerTx is the work a LedgerStore transaction exposes to the service.
 type ledgerTx struct {
 	q *sqlcgen.Queries
 }
@@ -208,7 +196,6 @@ func (t *ledgerTx) PostEntry(ctx context.Context, n domain.NewLedgerEntry) (doma
 	return entryFromRow(row, n.Amount.Currency), nil
 }
 
-// withEntries loads the Ledger Entries of a Transaction row.
 func withEntries(ctx context.Context, q *sqlcgen.Queries, row sqlcgen.Transaction) (domain.TransactionDetail, error) {
 	rows, err := q.ListLedgerEntriesForTransaction(ctx, row.ID)
 	if err != nil {

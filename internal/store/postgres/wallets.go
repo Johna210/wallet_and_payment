@@ -21,19 +21,16 @@ const (
 	walletsUserCurrencyKey = "wallets_user_id_currency_key"
 )
 
-// WalletStore persists Wallets.
 type WalletStore struct {
 	pool *pgxpool.Pool
 	q    *sqlcgen.Queries
 }
 
-// NewWalletStore returns a WalletStore over pool.
 func NewWalletStore(pool *pgxpool.Pool) *WalletStore {
 	return &WalletStore{pool: pool, q: sqlcgen.New(pool)}
 }
 
-// Create inserts a new Active, zero-Balance Wallet. A second Wallet for the
-// same User and Currency is reported as wallet_already_exists.
+// Create reports a second Wallet for the same User and Currency as wallet_already_exists.
 func (s *WalletStore) Create(ctx context.Context, userID uuid.UUID, currency domain.Currency) (domain.Wallet, error) {
 	row, err := s.q.CreateWallet(ctx, sqlcgen.CreateWalletParams{UserID: userID, Currency: string(currency)})
 	if err != nil {
@@ -47,7 +44,6 @@ func (s *WalletStore) Create(ctx context.Context, userID uuid.UUID, currency dom
 	return walletFromRow(row), nil
 }
 
-// Get returns the Wallet with id, or wallet_not_found.
 func (s *WalletStore) Get(ctx context.Context, id uuid.UUID) (domain.Wallet, error) {
 	row, err := s.q.GetWallet(ctx, id)
 	if errors.Is(err, pgx.ErrNoRows) {
@@ -98,8 +94,6 @@ func (s *WalletStore) UpdateLocked(ctx context.Context, id uuid.UUID, change fun
 	return updated, nil
 }
 
-// List returns up to limit Wallets matching filter, newest first, starting
-// strictly after the position when it is non-nil.
 func (s *WalletStore) List(ctx context.Context, filter domain.WalletFilter, after *domain.WalletPosition, limit int) ([]domain.Wallet, error) {
 	params := sqlcgen.ListWalletsParams{RowLimit: int32(limit)}
 	if after != nil {

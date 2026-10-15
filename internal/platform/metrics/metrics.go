@@ -1,7 +1,6 @@
-// Package metrics owns the service's Prometheus instrumentation: HTTP request
-// counters and latencies, financial-operation counters and latencies, and
-// database pool gauges. Each Metrics has its own registry, so handlers built
-// side by side (as in tests) never share or double-register collectors.
+// Package metrics owns the service's Prometheus instrumentation. Each Metrics has
+// its own registry, so handlers built side by side (as in tests) never
+// double-register collectors.
 package metrics
 
 import (
@@ -14,7 +13,6 @@ import (
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 )
 
-// Metrics records and serves the service's metrics.
 type Metrics struct {
 	registry *prometheus.Registry
 
@@ -24,7 +22,6 @@ type Metrics struct {
 	operationTime *prometheus.HistogramVec
 }
 
-// New returns Metrics whose pool gauges read from pool.
 func New(pool *pgxpool.Pool) *Metrics {
 	m := &Metrics{
 		registry: prometheus.NewRegistry(),
@@ -52,7 +49,6 @@ func New(pool *pgxpool.Pool) *Metrics {
 	return m
 }
 
-// Handler serves the metrics in the Prometheus text format.
 func (m *Metrics) Handler() http.Handler {
 	return promhttp.HandlerFor(m.registry, promhttp.HandlerOpts{})
 }
@@ -64,7 +60,6 @@ func (m *Metrics) ObserveRequest(method, route string, status int, d time.Durati
 	m.requestTime.WithLabelValues(method, route).Observe(d.Seconds())
 }
 
-// ObserveOperation records one finished Deposit, Withdrawal or Transfer.
 func (m *Metrics) ObserveOperation(typ, outcome, reason string, d time.Duration) {
 	m.operations.WithLabelValues(typ, outcome, reason).Inc()
 	m.operationTime.WithLabelValues(typ).Observe(d.Seconds())

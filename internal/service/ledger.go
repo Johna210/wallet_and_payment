@@ -16,16 +16,13 @@ import (
 	"github.com/Johna210/wallet_and_payment/internal/domain"
 )
 
-// LedgerTx is the work available inside one database transaction. A
-// transaction is atomic: everything it did is kept only if the function that
-// received it returns nil.
+// LedgerTx is the work available inside one database transaction.
 type LedgerTx interface {
-	// FindByIdempotencyKey returns the Transaction stored under key, if any.
 	FindByIdempotencyKey(ctx context.Context, key string) (domain.TransactionDetail, bool, error)
-	// LockWallet reads the Wallet under a row lock (SELECT … FOR UPDATE) that
-	// is held until the database transaction ends. wallet_not_found if absent.
+	// LockWallet reads the Wallet under a SELECT … FOR UPDATE lock held until the
+	// transaction ends. wallet_not_found if absent.
 	LockWallet(ctx context.Context, id uuid.UUID) (domain.Wallet, error)
-	// Record stores a Transaction. A key already in use is reported as
+	// Record stores a Transaction. A key already in use is
 	// domain.ErrDuplicateIdempotencyKey.
 	Record(ctx context.Context, n domain.NewTransaction) (domain.Transaction, error)
 	// PostEntry stores a Ledger Entry and sets the Wallet's cached Balance to
@@ -33,24 +30,14 @@ type LedgerTx interface {
 	PostEntry(ctx context.Context, n domain.NewLedgerEntry) (domain.LedgerEntry, error)
 }
 
-// LedgerRepository is the storage LedgerService needs.
 type LedgerRepository interface {
-	// InTx runs fn in one database transaction: committed if fn returns nil,
-	// rolled back otherwise.
+	// InTx commits if fn returns nil and rolls back otherwise.
 	InTx(ctx context.Context, fn func(LedgerTx) error) error
-	// Get returns a Transaction with its Ledger Entries, or transaction_not_found.
 	Get(ctx context.Context, id uuid.UUID) (domain.TransactionDetail, error)
-	// List returns up to limit Transactions across all Wallets matching
-	// filter, newest first, starting strictly after the position when it is
-	// non-nil.
 	List(ctx context.Context, filter domain.TransactionFilter, after *domain.TransactionPosition, limit int) ([]domain.Transaction, error)
-	// ListForWallet returns up to limit of the Wallet's Transactions matching
-	// filter, as source or destination, newest first, starting strictly after
-	// the position when it is non-nil.
 	ListForWallet(ctx context.Context, walletID uuid.UUID, filter domain.TransactionFilter, after *domain.TransactionPosition, limit int) ([]domain.Transaction, error)
 }
 
-// WalletReader reads Wallets outside any transaction.
 type WalletReader interface {
 	Get(ctx context.Context, id uuid.UUID) (domain.Wallet, error)
 }
@@ -67,13 +54,11 @@ const NoReason = "none"
 
 // OperationObserver is told how every money-moving request ended.
 type OperationObserver interface {
-	// ObserveOperation reports one finished Deposit, Withdrawal or Transfer:
-	// its type, one of the Outcome constants, the Rejection code (NoReason
-	// unless rejected) and how long it took.
+	// ObserveOperation reports one finished Deposit, Withdrawal or Transfer.
+	// reason is NoReason unless the outcome is rejected.
 	ObserveOperation(typ, outcome, reason string, d time.Duration)
 }
 
-// LedgerService moves money and reads the resulting Transactions.
 type LedgerService struct {
 	repo      LedgerRepository
 	wallets   WalletReader
@@ -82,24 +67,17 @@ type LedgerService struct {
 	maxAmount int64 // minor units
 }
 
-// NewLedgerService returns a LedgerService that logs every financial operation
-// to logger, reports each one to observer, and refuses any single operation
-// above maxAmount minor units.
 func NewLedgerService(repo LedgerRepository, wallets WalletReader, logger *slog.Logger, maxAmount int64, observer OperationObserver) *LedgerService {
 	return &LedgerService{repo: repo, wallets: wallets, logger: logger, maxAmount: maxAmount, observer: observer}
 }
 
-// MoneyMovement is the outcome of a money-moving request.
 type MoneyMovement struct {
 	Transaction domain.TransactionDetail
-	// Replayed is true when the request repeated an earlier one and the
-	// original Transaction was returned instead of a new one.
+	// Replayed is true when an earlier request with the same key supplied the Transaction.
 	Replayed bool
 }
 
-// walletMove describes a Transaction that changes the Balance of one Wallet:
-// money comes in from outside the system (a Deposit) or goes out of it (a
-// Withdrawal).
+// walletMove describes a Deposit or Withdrawal, which changes the Balance of one Wallet.
 type walletMove struct {
 	typ      domain.TransactionType
 	name     string // for error messages
@@ -113,19 +91,14 @@ var (
 	withdrawalMove = walletMove{typ: domain.TypeWithdrawal, name: "withdrawal", apply: domain.Wallet.Debit}
 )
 
-// Deposit adds amount (a decimal string in the Wallet's Currency) to the Wallet.
 func (s *LedgerService) Deposit(ctx context.Context, walletID uuid.UUID, amount, idempotencyKey string) (MoneyMovement, error) {
 	return s.moveOneWallet(ctx, depositMove, walletID, amount, idempotencyKey)
 }
 
-// Withdraw takes amount (a decimal string in the Wallet's Currency) out of the
-// Wallet, refusing any amount greater than its Balance.
 func (s *LedgerService) Withdraw(ctx context.Context, walletID uuid.UUID, amount, idempotencyKey string) (MoneyMovement, error) {
 	return s.moveOneWallet(ctx, withdrawalMove, walletID, amount, idempotencyKey)
 }
 
-// Transfer moves amount (a decimal string in the Wallets' shared Currency)
-// from the source Wallet to the destination Wallet.
 func (s *LedgerService) Transfer(ctx context.Context, sourceID, destinationID uuid.UUID, amount, idempotencyKey string) (out MoneyMovement, err error) {
 	op := financialOp{typ: domain.TypeTransfer, walletIDs: []uuid.UUID{sourceID, destinationID}, amount: amount, key: idempotencyKey, start: time.Now()}
 	defer func() { s.finish(ctx, op, out, err) }()
@@ -198,9 +171,8 @@ func (s *LedgerService) Transfer(ctx context.Context, sourceID, destinationID uu
 	return out, nil
 }
 
-// lockInOrder locks the two Wallets in ascending id order, the same order for
-// every Transfer, so concurrent Transfers between the same Wallets cannot
-// deadlock (ADR-0002). It returns the locked Wallets by id.
+// lockInOrder locks both Wallets in ascending id order, the same for every Transfer,
+// so concurrent Transfers cannot deadlock (ADR-0002). It returns them by id.
 func lockInOrder(ctx context.Context, tx LedgerTx, a, b uuid.UUID) (map[uuid.UUID]domain.Wallet, error) {
 	first, second := a, b
 	if bytes.Compare(second[:], first[:]) < 0 {
@@ -240,9 +212,7 @@ func (s *LedgerService) moveOneWallet(ctx context.Context, move walletMove, wall
 		}
 		// Record before the business rules: a concurrent request with this key
 		// that committed while we waited for the lock must be answered as a
-		// replay (via ErrDuplicateIdempotencyKey), not judged against a Wallet
-		// its own Transaction has since changed. A rule failure below still
-		// rolls the Transaction back, so Rejections store nothing.
+		// replay, not judged against a Wallet its Transaction has since changed.
 		newTx := domain.NewTransaction{
 			Type:           move.typ,
 			Amount:         money,
@@ -281,16 +251,12 @@ func (s *LedgerService) moveOneWallet(ctx context.Context, move walletMove, wall
 	return out, nil
 }
 
-// execute is the money-moving flow every operation shares (ADR-0002). Inside
-// one database transaction it first looks the Idempotency Key up: a stored
-// Transaction with the same request hash is replayed, one with a different
-// hash is a key reuse. Otherwise apply locks the Wallets, checks the business
-// rules, and records the Transaction and Ledger Entries; any error it returns
-// rolls everything back, so Rejections store nothing and the key stays free.
-//
-// If a concurrent request with the same key commits between the lookup and
-// the insert, the insert fails with ErrDuplicateIdempotencyKey; execute then
-// rolls back and answers from the winner's stored Transaction.
+// execute is the money-moving flow every operation shares (ADR-0002). It
+// replays a stored Transaction with the same request hash, rejects a
+// different hash as key reuse, and otherwise runs apply in one database
+// transaction. If a racing request with the same key commits first, the
+// insert fails with ErrDuplicateIdempotencyKey and execute answers from the
+// winner's Transaction.
 func (s *LedgerService) execute(ctx context.Context, key, hash string, apply func(LedgerTx) (domain.TransactionDetail, error)) (MoneyMovement, error) {
 	var out MoneyMovement
 	err := s.repo.InTx(ctx, func(tx LedgerTx) error {
@@ -327,7 +293,6 @@ func (s *LedgerService) execute(ctx context.Context, key, hash string, apply fun
 	return out, err
 }
 
-// replay answers a request whose Idempotency Key already has a Transaction.
 func replay(stored domain.TransactionDetail, hash string) (MoneyMovement, error) {
 	if stored.RequestHash != hash {
 		return MoneyMovement{}, domain.NewError(domain.CodeIdempotencyKeyReuse,
@@ -336,7 +301,6 @@ func replay(stored domain.TransactionDetail, hash string) (MoneyMovement, error)
 	return MoneyMovement{Transaction: stored, Replayed: true}, nil
 }
 
-// financialOp describes a money-moving request for the financial-operation log.
 type financialOp struct {
 	typ       domain.TransactionType
 	walletIDs []uuid.UUID
@@ -360,10 +324,7 @@ func (s *LedgerService) finish(ctx context.Context, op financialOp, m MoneyMovem
 	s.observer.ObserveOperation(strings.ToLower(string(op.typ)), outcome, reason, time.Since(op.start))
 }
 
-// logOutcome writes the one "financial operation" line every money-moving
-// request produces, so an operator can follow what happened to a Transaction:
-// completed, replayed, rejected (a business rule refused it, with the reason),
-// or failed (an unexpected error).
+// logOutcome writes the one "financial operation" line every money-moving request produces.
 func (s *LedgerService) logOutcome(ctx context.Context, op financialOp, m MoneyMovement, err error) {
 	attrs := []slog.Attr{
 		slog.String("type", string(op.typ)),
@@ -401,7 +362,6 @@ func (s *LedgerService) logOutcome(ctx context.Context, op financialOp, m MoneyM
 	s.logger.LogAttrs(ctx, level, "financial operation", attrs...)
 }
 
-// GetTransaction returns the Transaction with id and its Ledger Entries.
 func (s *LedgerService) GetTransaction(ctx context.Context, id uuid.UUID) (domain.TransactionDetail, error) {
 	d, err := s.repo.Get(ctx, id)
 	if err != nil {
@@ -410,8 +370,7 @@ func (s *LedgerService) GetTransaction(ctx context.Context, id uuid.UUID) (domai
 	return d, nil
 }
 
-// GetTransactionOfType is GetTransaction for a Transaction that must be of
-// type t; one of any other type is reported as not found.
+// GetTransactionOfType reports a Transaction of any other type as not found.
 func (s *LedgerService) GetTransactionOfType(ctx context.Context, id uuid.UUID, t domain.TransactionType) (domain.TransactionDetail, error) {
 	d, err := s.GetTransaction(ctx, id)
 	if err != nil {
@@ -424,9 +383,6 @@ func (s *LedgerService) GetTransactionOfType(ctx context.Context, id uuid.UUID, 
 	return d, nil
 }
 
-// ListTransactions returns up to limit Transactions across all Wallets
-// matching filter, newest first, starting strictly after the position when it
-// is non-nil. limit must be positive.
 func (s *LedgerService) ListTransactions(ctx context.Context, filter domain.TransactionFilter, after *domain.TransactionPosition, limit int) (domain.TransactionPage, error) {
 	if limit < 1 {
 		return domain.TransactionPage{}, fmt.Errorf("list transactions: limit must be positive, got %d", limit)
@@ -439,16 +395,11 @@ func (s *LedgerService) ListTransactions(ctx context.Context, filter domain.Tran
 	return trimToPage(txs, limit), nil
 }
 
-// ListWalletTransactions returns up to limit of the Wallet's Transactions
-// matching filter, as source or destination, newest first, starting strictly
-// after the position when it is non-nil. limit must be positive.
 func (s *LedgerService) ListWalletTransactions(ctx context.Context, walletID uuid.UUID, filter domain.TransactionFilter, after *domain.TransactionPosition, limit int) (domain.TransactionPage, error) {
 	if limit < 1 {
 		return domain.TransactionPage{}, fmt.Errorf("list wallet transactions: limit must be positive, got %d", limit)
 	}
-	// Wallets are never deleted, so one that exists now still exists when the
-	// listing runs. Without this check an unknown id would read as an empty
-	// statement.
+	// Without this check an unknown id would read as an empty statement.
 	if _, err := s.wallets.Get(ctx, walletID); err != nil {
 		return domain.TransactionPage{}, fmt.Errorf("list wallet transactions: %w", err)
 	}
@@ -459,8 +410,7 @@ func (s *LedgerService) ListWalletTransactions(ctx context.Context, walletID uui
 	return trimToPage(txs, limit), nil
 }
 
-// trimToPage trims txs, fetched with one row beyond limit, to a page and points
-// Next at its last row when that extra row shows more follow.
+// trimToPage cuts the extra row fetched beyond limit and sets Next when it was there.
 func trimToPage(txs []domain.Transaction, limit int) domain.TransactionPage {
 	if len(txs) <= limit {
 		return domain.TransactionPage{Transactions: txs}
@@ -470,9 +420,8 @@ func trimToPage(txs []domain.Transaction, limit int) domain.TransactionPage {
 	return domain.TransactionPage{Transactions: txs, Next: &domain.TransactionPosition{CreatedAt: last.CreatedAt, ID: last.ID}}
 }
 
-// parseAmount parses a request amount in currency c and checks it against the
-// per-operation limit. Zero is rejected here because ParseMoney only rules out
-// negative and malformed input.
+// parseAmount parses a request amount in currency c, rejecting zero (which
+// ParseMoney allows) and anything over the per-operation limit.
 func (s *LedgerService) parseAmount(amount string, c domain.Currency) (domain.Money, error) {
 	m, err := domain.ParseMoney(amount, c)
 	if err != nil {

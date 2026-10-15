@@ -14,7 +14,6 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
-// recordedQuery is a statement the service ran against the database.
 type recordedQuery struct {
 	sql  string
 	args []any
@@ -41,7 +40,6 @@ func (r *queryRecorder) reset() {
 	r.queries = nil
 }
 
-// reading returns the recorded statements that read from the given table.
 func (r *queryRecorder) reading(table string) []recordedQuery {
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -65,7 +63,6 @@ type planNode struct {
 	Plans         []planNode `json:"Plans"`
 }
 
-// String renders the plan as an indented tree, for failure messages.
 func (n planNode) String() string {
 	var b strings.Builder
 	var render func(planNode, int)
@@ -91,7 +88,6 @@ func (n planNode) String() string {
 	return b.String()
 }
 
-// walk calls visit on n and every node beneath it.
 func (n planNode) walk(visit func(planNode)) {
 	visit(n)
 	for _, c := range n.Plans {
@@ -131,11 +127,9 @@ func explain(t *testing.T, q recordedQuery, generic bool) planNode {
 	return plans[0].Plan
 }
 
-// seedLargeHistory bulk-inserts 30,000 Transactions across 60 Wallets straight
-// into the database and analyses the tables, so the planner sees the volume and
-// distribution of a real deployment instead of an empty table. It returns the
-// Wallet ids. The rows carry no Ledger Entries (ADR-0001): only the listing
-// plans are examined here, and the invariant is covered by the money-moving tests.
+// seedLargeHistory bulk-inserts 30,000 Transactions across 60 Wallets and analyses
+// the tables, so the planner sees the volume of a real deployment. The rows carry
+// no Ledger Entries (ADR-0001): only the listing plans are examined here.
 func seedLargeHistory(t *testing.T) []string {
 	t.Helper()
 	ctx := context.Background()
@@ -178,18 +172,14 @@ func seedLargeHistory(t *testing.T) []string {
 	return ids
 }
 
-// TestTransactionListQueriesUseIndexes drives the listing endpoints over a pool
-// that records its statements, then asks Postgres how it would run each one
-// against a realistically large table, both for the request's own values and as
-// the generic plan a cached prepared statement can switch to.
+// TestTransactionListQueriesUseIndexes asks Postgres how it would run each listing
+// query against a large table, for the request's own values and as the generic
+// plan a cached prepared statement can switch to.
 //
-// This is a deliberate exception to the rule that tests assert external
-// behaviour only (spec #1, Testing Decisions): the acceptance criteria of issue
-// #9 require that "queries use the indexes from the spec schema (no sequential
-// scans on the wallet-scoped path)", and a response body cannot show that. The
-// test is still coupled to no SQL text: it explains whatever the handler sent.
-// It does read Postgres's EXPLAIN output, so it is pinned to the Postgres major
-// version the integration tests start (see main_test.go).
+// This is a deliberate exception to "tests assert external behaviour only" (spec #1):
+// issue #9 requires no sequential scans on the wallet-scoped path, which a response
+// body cannot show. It is coupled to no SQL text, but it reads EXPLAIN output, so
+// it is pinned to the Postgres major version main_test.go starts.
 func TestTransactionListQueriesUseIndexes(t *testing.T) {
 	truncate(t)
 	rec := &queryRecorder{}

@@ -28,7 +28,6 @@ const (
 	CodeIdempotencyKeyReuse     Code = "idempotency_key_reuse"
 )
 
-// FieldError describes one invalid input field.
 type FieldError struct {
 	Field   string `json:"field"`
 	Message string `json:"message"`
@@ -53,17 +52,14 @@ func (e *Error) Error() string {
 	return string(e.Code) + ": " + e.Message + " (" + strings.Join(parts, "; ") + ")"
 }
 
-// NewError returns a domain error with the given code and client-safe message.
 func NewError(code Code, message string) *Error {
 	return &Error{Code: code, Message: message}
 }
 
-// ValidationError returns a validation_failed error listing the offending fields.
 func ValidationError(fields ...FieldError) *Error {
 	return &Error{Code: CodeValidationFailed, Message: "the request is invalid", Fields: fields}
 }
 
-// AsError reports whether err wraps a domain *Error and returns it.
 func AsError(err error) (*Error, bool) {
 	var de *Error
 	ok := errors.As(err, &de)

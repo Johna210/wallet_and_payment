@@ -46,8 +46,7 @@ var statusByCode = map[domain.Code]int{
 	codeNotReady:         http.StatusServiceUnavailable,
 }
 
-// problem is an RFC 9457 application/problem+json body with the service's
-// extension members.
+// problem is an RFC 9457 problem+json body with the service's extension members.
 type problem struct {
 	Type      string              `json:"type"`
 	Title     string              `json:"title"`
@@ -104,7 +103,6 @@ func writeProblem(w http.ResponseWriter, r *http.Request, status int, de *domain
 	})
 }
 
-// writeJSON writes v as a JSON response with the given status.
 func writeJSON(w http.ResponseWriter, status int, v any) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
