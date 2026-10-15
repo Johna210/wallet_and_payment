@@ -98,6 +98,20 @@ func (w Wallet) Credit(amount Money) (Wallet, error) {
 	return w, nil
 }
 
+// Debit returns the Wallet with amount taken from its Balance. Only an Active
+// Wallet can send money, and the Balance may never go below zero.
+func (w Wallet) Debit(amount Money) (Wallet, error) {
+	if w.Status != WalletActive {
+		return Wallet{}, NewError(CodeWalletNotActive,
+			fmt.Sprintf("a %s wallet cannot send money", w.Status))
+	}
+	if amount.Minor > w.Balance.Minor {
+		return Wallet{}, NewError(CodeInsufficientFunds, "the wallet balance is less than the amount")
+	}
+	w.Balance.Minor -= amount.Minor
+	return w, nil
+}
+
 // canTransition is the Wallet Status transition table for distinct statuses.
 func canTransition(from, to WalletStatus) bool {
 	switch from {
